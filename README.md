@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/drizziq-screenshot.png" alt="Drizziq running on a OnePlus 5T, showing live DWD weather for Munich in its dark forecast view" width="300">
+  <img src="docs/drizziq-v1.0.0-screenshot.png" alt="Drizziq running on a OnePlus 5T, showing live DWD weather for Munich in its dark forecast view" width="300">
 </p>
 
 Drizziq is a native Kotlin Android app for one selected place, specified in [SPEC.md](docs/SPEC.md). It reads weather directly from Deutscher Wetterdienst open data and runs on Android 7.0+ (API 24). No accounts, ads, analytics, tracking, or GPS permission.

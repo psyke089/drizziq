@@ -36,9 +36,9 @@ The script records actual instrumentation output, captures the offline screen, a
 
 ## Visual checks and screenshot provenance
 
-- [README screenshot](drizziq-screenshot.png): raw `adb exec-out screencap -p` capture of the live Munich forecast on the phone.
-- [Radar screenshot](drizziq-radar.png): raw capture of the live DWD radar, selected Munich marker, loaded OpenStreetMap basemap, attribution, timeline, NOW marker and legend.
-- [Airplane-mode screenshot](verification/drizziq-offline.png): raw capture showing the retained Munich forecast with stale/offline labels and the airplane-mode system indicator.
+- [README screenshot](drizziq-v1.0.0-screenshot.png): raw `adb exec-out screencap -p` capture of the live Munich forecast on the phone.
+- [Radar screenshot](drizziq-v1.0.0-radar.png): raw capture of the live DWD radar, selected Munich marker, loaded OpenStreetMap basemap, attribution, timeline, NOW marker and legend.
+- [Airplane-mode screenshot](verification/drizziq-v1.0.0-offline.png): raw capture showing the retained Munich forecast with stale/offline labels and the airplane-mode system indicator.
 
 The forecast and radar screenshots were visually inspected at native phone aspect ratio. No readings, map frames, timestamps or screenshot UI were composited or mocked. README badges are local SVG assets created in the repository. The README is rendered through Codeberg's Markdown API and its image/badge assets are checked after push.
 
