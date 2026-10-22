@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-22T20:56:45.452950+00:00",
+  "apk_sha256": "7a0b3a8246134bd56da58285e5bc0c036e69fa9ec73cad7bd0e35a8ab0b8f542",
+  "package": "app.drizziq",
+  "version": "1.0.0",
+  "min_sdk": 24,
+  "tested_device": "OnePlus 5T (ONEPLUS A5010)",
+  "tested_api": 33,
+  "device_phases": {
+    "device-main": "PASS",
+    "device-forecast": "PASS",
+    "device-persistence": "PASS",
+    "device-offline": "PASS",
+    "device-restore": "PASS"
+  }
+}

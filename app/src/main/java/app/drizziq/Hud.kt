@@ -1,0 +1,86 @@
+package app.drizziq
+
+import android.content.Context
+import android.graphics.*
+import android.graphics.drawable.GradientDrawable
+import android.view.View
+import android.widget.*
+import kotlin.math.*
+
+object Hud {
+    val bg=Color.rgb(8,15,25); val panel=Color.rgb(15,26,40); val line=Color.rgb(35,53,72)
+    val ink=Color.rgb(232,241,247); val muted=Color.rgb(147,167,188)
+    val cyan=Color.rgb(124,230,210); val amber=Color.rgb(244,188,114); val red=Color.rgb(244,119,140)
+    fun color(state:Freshness)=when(state) { Freshness.LIVE->cyan; Freshness.STALE->amber; Freshness.ERROR->red; else->muted }
+}
+fun Context.dp(n:Float) = (n*resources.displayMetrics.density).roundToInt()
+fun Context.dp(n:Int)=dp(n.toFloat())
+fun panel(fill:Int=Hud.panel,stroke:Int=Hud.line,radius:Float=16f)=GradientDrawable().apply { setColor(fill); setStroke(1,stroke); cornerRadius=radius }
+fun Context.label(text:String,size:Float=14f,color:Int=Hud.ink,mono:Boolean=false)=TextView(this).apply {
+    this.text=text; textSize=size; setTextColor(color); includeFontPadding=false
+    typeface=if(mono) Typeface.create("monospace",Typeface.NORMAL) else Typeface.create("sans-serif",Typeface.NORMAL)
+}
+fun Context.column()=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
+fun Context.row()=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.CENTER_VERTICAL }
+fun View.pad(n:Int) { val d=context.dp(n); setPadding(d,d,d,d) }
+fun LinearLayout.space(height:Int)=addView(View(context),LinearLayout.LayoutParams(1,context.dp(height)))
+fun Context.action(title:String,description:String=title,click:()->Unit)=Button(this).apply {
+    text=title; contentDescription=description; textSize=11f; letterSpacing=.08f; setTextColor(Hud.cyan)
+    isAllCaps=false; minWidth=0; minimumWidth=0; minHeight=dp(48); minimumHeight=dp(48)
+    setPadding(dp(12),0,dp(12),0); background=panel(Hud.panel,Hud.line,dp(10).toFloat())
+    setOnClickListener { click() }
+}
+
+/** All pictograms are drawn here; there are no downloaded icon or font assets. */
+class WeatherGlyph(context:Context,var code:Int?=null,private val logo:Boolean=false):View(context) {
+    private val p=Paint(Paint.ANTI_ALIAS_FLAG)
+    override fun onDraw(canvas:Canvas) {
+        super.onDraw(canvas)
+        val scale=min(width,height)/100f
+        canvas.save(); canvas.translate((width-100*scale)/2,(height-100*scale)/2); canvas.scale(scale,scale)
+        p.style=Paint.Style.STROKE; p.strokeWidth=2f; p.color=Hud.cyan; p.strokeCap=Paint.Cap.ROUND
+        if(logo) {
+            canvas.drawCircle(50f,50f,36f,p); p.alpha=75; canvas.drawCircle(50f,50f,24f,p); p.alpha=255
+            canvas.drawLine(50f,9f,50f,22f,p);canvas.drawLine(50f,78f,50f,91f,p);canvas.drawLine(9f,50f,22f,50f,p);canvas.drawLine(78f,50f,91f,50f,p)
+            p.style=Paint.Style.FILL
+            val path=Path().apply { moveTo(50f,30f); cubicTo(45f,40f,36f,49f,36f,59f); cubicTo(36f,76f,64f,76f,64f,59f); cubicTo(64f,49f,55f,40f,50f,30f) };canvas.drawPath(path,p)
+        } else if(code!=null) {
+            val c=code!!
+            if(c in 0..2) {
+                p.color=Hud.amber; val cx=if(c==0)50f else 36f;val cy=if(c==0)45f else 36f
+                canvas.drawCircle(cx,cy,15f,p)
+                for(i in 0..7) { val a=i*Math.PI/4; canvas.drawLine(cx+(cos(a)*22).toFloat(),cy+(sin(a)*22).toFloat(),cx+(cos(a)*29).toFloat(),cy+(sin(a)*29).toFloat(),p) }
+            }
+            if(c!=0) {
+                p.color=Hud.cyan
+                val path=Path().apply { moveTo(25f,65f); cubicTo(10f,64f,10f,44f,27f,43f); cubicTo(29f,19f,65f,20f,69f,42f); cubicTo(90f,39f,96f,64f,77f,65f); close() }
+                canvas.drawPath(path,p)
+                if(c>=50) for(x in listOf(34f,50f,66f)) {
+                    if(c in 70..79 || c in 85..94) { canvas.drawLine(x-3,77f,x+3,83f,p);canvas.drawLine(x+3,77f,x-3,83f,p) }
+                    else canvas.drawLine(x,75f,x-4,85f,p)
+                }
+                if(c in 40..49) {canvas.drawLine(22f,76f,77f,76f,p);canvas.drawLine(30f,84f,70f,84f,p)}
+            }
+        }
+        canvas.restore()
+    }
+}
+
+class TemperatureTrace(context:Context,private val hours:List<Hour>):View(context) {
+    private val p=Paint(Paint.ANTI_ALIAS_FLAG)
+    override fun onDraw(c:Canvas) {
+        val valid=hours.mapNotNull { it.temperature }; if(valid.size<2)return
+        val lo=valid.min();val hi=valid.max();val range=max(2.0,hi-lo)
+        p.color=Hud.line;p.strokeWidth=1f
+        for(i in 1..3)c.drawLine(0f,height*i/4f,width.toFloat(),height*i/4f,p)
+        p.color=Hud.cyan;p.strokeWidth=context.dp(2).toFloat();p.style=Paint.Style.STROKE
+        var last:Pair<Float,Float>?=null
+        hours.forEachIndexed { i,h ->
+            val t=h.temperature
+            if(t==null)last=null else {
+                val point=(i*width.toFloat()/max(1,hours.size-1)) to (height*.85-(t-lo)/range*height*.65).toFloat()
+                last?.let { c.drawLine(it.first,it.second,point.first,point.second,p) };c.drawCircle(point.first,point.second,context.dp(2).toFloat(),p);last=point
+            }
+        }
+    }
+}

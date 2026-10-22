@@ -1,0 +1,3 @@
+INSTRUMENTATION_RESULT: checks=live Munich; coordinate validation; live Berlin; save two favourites; radar pan; two-finger pinch; zoom buttons; recenter; scrub to +120; playback loop; select favourite
+INSTRUMENTATION_RESULT: result=PASS
+INSTRUMENTATION_CODE: 0

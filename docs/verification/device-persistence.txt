@@ -1,0 +1,3 @@
+INSTRUMENTATION_RESULT: checks=favourites survived force-stop; selected Berlin; deleted Berlin; selected Munich
+INSTRUMENTATION_RESULT: result=PASS
+INSTRUMENTATION_CODE: 0

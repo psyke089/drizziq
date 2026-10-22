@@ -1,0 +1,3 @@
+INSTRUMENTATION_RESULT: checks=connectivity recovery returns forecast to live
+INSTRUMENTATION_RESULT: result=PASS
+INSTRUMENTATION_CODE: 0

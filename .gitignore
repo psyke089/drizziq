@@ -1,0 +1,15 @@
+.gradle/
+.gradle-user/
+.kotlin/
+**/build/
+local.properties
+*.jks
+*.keystore
+keystore.properties
+.idea/
+*.iml
+tmp/
+.agents/
+.codex/
+.aws/
+tools/.cache/
