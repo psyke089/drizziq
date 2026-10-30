@@ -7,8 +7,8 @@ android {
         applicationId = "app.drizziq"
         minSdk = 24
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
         testInstrumentationRunner = "app.drizziq.PhoneExercise"
     }
     compileOptions {
@@ -17,7 +17,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
     buildTypes { release { isMinifyEnabled = false } }
-    testOptions { unitTests.isReturnDefaultValues = true }
+    lint {
+        baseline = file("lint-baseline.xml")
+        warningsAsErrors = true
+    }
 }
 
 dependencies {

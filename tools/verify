@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+"""Local verification entry point; pass --gradle-only TASK [Gradle options] to focus."""
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def main():
+    arguments = sys.argv[1:]
+    if "--help" in arguments or "-h" in arguments:
+        print(__doc__)
+        print("Default: Python tooling tests, then Gradle verifyLocal. Use --offline after the first successful online run.")
+        return 0
+    focused = "--gradle-only" in arguments
+    if focused:
+        arguments.remove("--gradle-only")
+        if not any(not argument.startswith("-") for argument in arguments):
+            raise SystemExit("--gradle-only requires a task, e.g. testDebugUnitTest")
+    environment = os.environ.copy()
+    jdk = Path("/usr/lib/jvm/java-21-openjdk")
+    if "JAVA_HOME" not in environment and jdk.is_dir():
+        environment["JAVA_HOME"] = str(jdk)
+    android = ROOT / "tmp/android"
+    if "ANDROID_USER_HOME" not in environment and (android / "debug.keystore").exists():
+        environment["ANDROID_USER_HOME"] = str(android)
+    if not shutil.which("java", path=environment.get("PATH")) and "JAVA_HOME" not in environment:
+        raise SystemExit("JDK 21 is required; set JAVA_HOME.")
+    if not focused:
+        result = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tools/tests", "-v"], cwd=ROOT, env=environment)
+        if result.returncode:
+            return result.returncode
+    tasks = arguments if focused else ["verifyLocal", *arguments]
+    return subprocess.run([str(ROOT / "gradlew"), "--no-daemon", *tasks], cwd=ROOT, env=environment).returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())

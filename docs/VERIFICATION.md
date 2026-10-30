@@ -26,10 +26,10 @@ The recorded native instrumentation phases all returned `result=PASS`:
 
 The phone's initial airplane / Wi-Fi / mobile-data settings were `off / on / on`; these settings were restored. The final foreground app is the Munich forecast, with a saved Munich favourite.
 
-Reproduce the exercise after building and installing both APKs:
+These are historical results from 2026-10-22. For current commands and test-first development, see [DEVELOPMENT.md](DEVELOPMENT.md). Reproduce the full integration exercise after building and installing both APKs:
 
 ```sh
-python tools/verify_phone.py --serial YOUR_ADB_SERIAL
+python3 tools/verify_phone.py --serial YOUR_ADB_SERIAL --full
 ```
 
 The script records actual instrumentation output, captures the offline screen, and restores the original radio settings in a `finally` block. It deliberately creates and deletes labelled test favourites. A network connection and an unlocked phone are needed for the live phases.

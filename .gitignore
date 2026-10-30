@@ -13,3 +13,5 @@ tmp/
 .codex/
 .aws/
 tools/.cache/
+__pycache__/
+*.pyc

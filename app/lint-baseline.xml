@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 9.4.1" type="baseline" client="gradle" dependencies="false" name="AGP (9.4.1)" variant="all" version="9.4.1">
+
+    <issue
+        id="AndroidGradlePluginVersion"
+        message="A newer version of Gradle than 9.6.0 is available: 9.8.2"
+        errorLine1="distributionUrl=https\://services.gradle.org/distributions/gradle-9.6.0-bin.zip"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="$HOME/Projects/drizziq/gradle/wrapper/gradle-wrapper.properties"
+            line="5"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of io.jhdf:jhdf than 0.8.6 is available: 0.13.0"
+        errorLine1="    implementation(&quot;io.jhdf:jhdf:0.8.6&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="28"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="DataExtractionRules"
+        message="The attribute `android:allowBackup` is deprecated from Android 12 and higher and may be removed in future versions. Consider adding the attribute `android:dataExtractionRules` specifying an `@xml` resource which configures cloud backups and device transfers on Android 12 and higher."
+        errorLine1="        android:icon=&quot;@mipmap/ic_launcher&quot; android:roundIcon=&quot;@mipmap/ic_launcher&quot; android:allowBackup=&quot;false&quot;"
+        errorLine2="                                                                                                        ~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="6"
+            column="105"/>
+    </issue>
+
+    <issue
+        id="DrawAllocation"
+        message="Avoid object allocations during draw/layout operations (preallocate and reuse instead)"
+        errorLine1="            val path=Path().apply { moveTo(50f,30f); cubicTo(45f,40f,36f,49f,36f,59f); cubicTo(36f,76f,64f,76f,64f,59f); cubicTo(64f,49f,55f,40f,50f,30f) };canvas.drawPath(path,p)"
+        errorLine2="                     ~~~~~~">
+        <location
+            file="src/main/java/app/drizziq/Hud.kt"
+            line="46"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="DrawAllocation"
+        message="Avoid object allocations during draw/layout operations (preallocate and reuse instead)"
+        errorLine1="                val path=Path().apply { moveTo(25f,65f); cubicTo(10f,64f,10f,44f,27f,43f); cubicTo(29f,19f,65f,20f,69f,42f); cubicTo(90f,39f,96f,64f,77f,65f); close() }"
+        errorLine2="                         ~~~~~~">
+        <location
+            file="src/main/java/app/drizziq/Hud.kt"
+            line="56"
+            column="26"/>
+    </issue>
+
+    <issue
+        id="DrawAllocation"
+        message="Avoid object allocations during draw/layout operations (preallocate and reuse instead)"
+        errorLine1="        c.drawPath(Path().apply {moveTo(50f,76f);lineTo(39f,59f);lineTo(50f,64f);lineTo(61f,59f);close()},p)"
+        errorLine2="                   ~~~~~~">
+        <location
+            file="src/main/java/app/drizziq/Hud.kt"
+            line="88"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="DrawAllocation"
+        message="Avoid object allocations during draw/layout operations (preallocate and reuse instead)"
+        errorLine1="                c.drawPath(Path().apply {moveTo(12f,22f);cubicTo(9f,18f,4f,13f,4f,9f);cubicTo(4f,-1f,20f,-1f,20f,9f);cubicTo(20f,13f,15f,18f,12f,22f);close()},p)"
+        errorLine2="                           ~~~~~~">
+        <location
+            file="src/main/java/app/drizziq/Hud.kt"
+            line="113"
+            column="28"/>
+    </issue>
+
+    <issue
+        id="MonochromeLauncherIcon"
+        message="The application adaptive icon is missing a monochrome tag"
+        errorLine1="&lt;adaptive-icon xmlns:android=&quot;http://schemas.android.com/apk/res/android&quot;>"
+        errorLine2="^">
+        <location
+            file="src/main/res/mipmap-anydpi-v26/ic_launcher.xml"
+            line="2"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="ViewConstructor"
+        message="Custom view `WeatherGlyph` is missing constructor used by tools: `(Context)` or `(Context,AttributeSet)` or `(Context,AttributeSet,int)`"
+        errorLine1="class WeatherGlyph(context:Context,var code:Int?=null,private val logo:Boolean=false):View(context) {"
+        errorLine2="      ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/app/drizziq/Hud.kt"
+            line="35"
+            column="7"/>
+    </issue>
+
+    <issue
+        id="ViewConstructor"
+        message="Custom view `WindDirectionGlyph` is missing constructor used by tools: `(Context)` or `(Context,AttributeSet)` or `(Context,AttributeSet,int)`"
+        errorLine1="class WindDirectionGlyph(context:Context,private val bearing:Double):View(context) {"
+        errorLine2="      ~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/app/drizziq/Hud.kt"
+            line="72"
+            column="7"/>
+    </issue>
+
+    <issue
+        id="ViewConstructor"
+        message="Custom view `NavigationGlyph` is missing constructor used by tools: `(Context)` or `(Context,AttributeSet)` or `(Context,AttributeSet,int)`"
+        errorLine1="class NavigationGlyph(context:Context,private val destination:String):View(context) {"
+        errorLine2="      ~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/app/drizziq/Hud.kt"
+            line="93"
+            column="7"/>
+    </issue>
+
+    <issue
+        id="ViewConstructor"
+        message="Custom view `TemperatureTrace` is missing constructor used by tools: `(Context)` or `(Context,AttributeSet)` or `(Context,AttributeSet,int)`"
+        errorLine1="class TemperatureTrace(context:Context,private val hours:List&lt;Hour>):View(context) {"
+        errorLine2="      ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/app/drizziq/Hud.kt"
+            line="121"
+            column="7"/>
+    </issue>
+
+    <issue
+        id="ClickableViewAccessibility"
+        message="`RadarMap#onTouchEvent` should call `RadarMap#performClick` when a click is detected"
+        errorLine1="    override fun onTouchEvent(event:MotionEvent):Boolean {"
+        errorLine2="                 ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/app/drizziq/RadarMap.kt"
+            line="85"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="SetTextI18n"
+        message="Do not concatenate text displayed with `setText`. Use resource string with placeholders."
+        errorLine1="        radarStatus.text=&quot;${reading.state.name}  /  DWD RV  ·  ${if(repo.online)&quot;CONNECTED&quot; else &quot;OFFLINE&quot;}&quot;"
+        errorLine2="                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/app/drizziq/MainActivity.kt"
+            line="273"
+            column="26"/>
+    </issue>
+
+    <issue
+        id="SetTextI18n"
+        message="String literal in `setText` can not be translated. Use Android resources instead."
+        errorLine1="        radarStatus.text=&quot;${reading.state.name}  /  DWD RV  ·  ${if(repo.online)&quot;CONNECTED&quot; else &quot;OFFLINE&quot;}&quot;"
+        errorLine2="                                               ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/app/drizziq/MainActivity.kt"
+            line="273"
+            column="48"/>
+    </issue>
+
+    <issue
+        id="SetTextI18n"
+        message="Do not concatenate text displayed with `setText`. Use resource string with placeholders."
+        errorLine1="                windowLabel.text=&quot;${Times.format(seq.frames.first().time,&quot;HH:mm&quot;,repo.place.zone)}  —  ${Times.format(seq.frames.last().time,&quot;HH:mm z&quot;,repo.place.zone)}${if(gap)&quot; · GAP BEFORE FRAME&quot; else &quot;&quot;}&quot;"
+        errorLine2="                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/app/drizziq/MainActivity.kt"
+            line="300"
+            column="34"/>
+    </issue>
+
+    <issue
+        id="SetTextI18n"
+        message="String literal in `setText` can not be translated. Use Android resources instead."
+        errorLine1="        frameType.text=&quot;LOADING FRAME&quot;"
+        errorLine2="                        ~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/app/drizziq/MainActivity.kt"
+            line="306"
+            column="25"/>
+    </issue>
+
+    <issue
+        id="SetTextI18n"
+        message="String literal in `setText` can not be translated. Use Android resources instead."
+        errorLine1="                    else if(token==decodeToken) {setPlaying(false);frameType.text=&quot;FRAME ERROR&quot;;radarMeta.text=&quot;Cached frame could not be read · tap to refresh&quot;}"
+        errorLine2="                                                                                   ~~~~~~~~~~~">
+        <location
+            file="src/main/java/app/drizziq/MainActivity.kt"
+            line="312"
+            column="84"/>
+    </issue>
+
+    <issue
+        id="SetTextI18n"
+        message="String literal in `setText` can not be translated. Use Android resources instead."
+        errorLine1="                    else if(token==decodeToken) {setPlaying(false);frameType.text=&quot;FRAME ERROR&quot;;radarMeta.text=&quot;Cached frame could not be read · tap to refresh&quot;}"
+        errorLine2="                                                                                                                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/app/drizziq/MainActivity.kt"
+            line="312"
+            column="113"/>
+    </issue>
+
+</issues>
