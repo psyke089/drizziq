@@ -8,6 +8,13 @@
 - `tools/verify` supplies local environment defaults; caller-provided environment variables take precedence. `--offline` requires dependencies to have been downloaded previously. Report missing dependencies separately from test failures.
 - There is no CI. Local verification is the required gate; do not assume a remote pipeline will catch failures.
 
+## Product design, assets and data
+
+- Visual language: dark, sci-fi and futuristic. Keep the interface consistent with the existing HUD palette and restrained typography/pictograms.
+- Use a single dark color scheme. Do not add a light mode or switch palettes based on the system theme.
+- Generate all visual assets for this project. Prefer locally authored vectors, Canvas drawing or procedural assets; use image generation when a raster asset is appropriate. Do not hunt for icons online or download icon packs/stock assets. Keep generated assets and their editable source in the repository where practical.
+- App data sources must be free and publicly available. Any source requiring an account or API key needs explicit user approval before integration, even if it has a free tier. Do not add an account/API-key requirement or obtain credentials implicitly.
+
 ## Test-first workflow (default for every behavior change)
 
 1. Write or extend the smallest meaningful test of the requested behavior before changing production code. For bugs, reproduce the failure with a regression test.
@@ -25,7 +32,7 @@ Documentation and formatting-only changes do not need artificial behavior tests.
 - Focused JVM test: `./tools/verify --gradle-only testDebugUnitTest --tests 'app.drizziq.ReadingPolicyTest'`
 - Formatting check / apply: `./tools/verify --gradle-only formatCheck` / `./tools/verify --gradle-only formatKotlin`
 - Android lint: `./tools/verify --gradle-only lintDebug`
-- Phone smoke checks: `python3 tools/verify_phone.py --serial SERIAL` (navigation, lifecycle and forecast; no favourites or connectivity changes).
+- Phone smoke checks: `python3 tools/verify_phone.py --serial SERIAL` (navigation, lifecycle, forecast, radar and viewport restart checks; no favourites or connectivity changes).
 - Full phone integration: `python3 tools/verify_phone.py --serial SERIAL --full` (also creates/deletes test favourites and temporarily changes airplane mode, Wi-Fi and mobile data; restores original settings).
 - Phone runner expects matching debug and test APKs installed. It does not install/uninstall applications. See `docs/DEVELOPMENT.md` for signing and installation.
 

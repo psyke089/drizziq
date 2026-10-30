@@ -18,9 +18,9 @@ Drizziq is a native Kotlin Android app for one selected place, specified in [SPE
 ## What it does
 
 - **Forecast.** Current forecast temperature, condition, wind and validity; a seven-day outlook with hourly temperature ranges, maximum wind, precipitation and sunshine; up to 48 hours of hourly detail. The selected coordinates, nearest DWD forecast station, distance, station elevation, forecast validity and issue time are explicit.
-- **Radar.** A freely pannable and zoomable map with a selected-place marker, recenter, pinch and button zoom, timeline scrubbing, a NOW marker, and looping playback. DWD RV supplies the preceding hour of observations and its available two-hour forecast, normally 37 frames. Each frame carries its actual DWD validity time. The legend shows millimetres per five minutes; hatching identifies missing radar data.
+- **Radar.** A large map with a subtle selected-place marker, drag to pan, pinch and double-tap zoom, a compact timeline and legend, and icon-based looping playback. The map center and zoom survive app restarts. Zoom and recenter are also available through accessibility actions. DWD RV supplies the preceding hour of observations and its available two-hour forecast, normally 37 frames. Each frame carries its actual DWD validity time. The legend shows millimetres per five minutes; hatching identifies missing radar data.
 - **Places.** Enter any valid latitude and longitude. Munich is the initial location. Save labelled favourites, select them, and delete them; both favourites and the selection persist across restarts. Time zones are estimated offline and can be overridden.
-- **Honest data states.** Loading, live, cached, stale and error are visible. Failed refreshes retain timestamped successful data. Missing DWD fields are omitted; relative humidity is normally absent from MOSMIX. Daily rain and sunshine totals require every hourly interval of a complete local day.
+- **Honest data states.** Forecast freshness is explicit; radar shows loading, cached, stale and error notices when needed. Failed refreshes retain timestamped successful data. Missing DWD fields are omitted; relative humidity is normally absent from MOSMIX. Daily rain and sunshine totals require every hourly interval of a complete local day.
 
 ## Build and install
 

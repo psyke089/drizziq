@@ -22,6 +22,9 @@ class RadarMap(context: Context) : View(context) {
     private val executor = Executors.newFixedThreadPool(3)
     private val handler = Handler(Looper.getMainLooper())
     private val folder = File(context.cacheDir, "tiles").apply { mkdirs() }
+    private val viewportPreferences =
+        context.getSharedPreferences("radar-viewport", Context.MODE_PRIVATE)
+    private var placeInitialized = false
     private var disposed = false
     private var x = .532151
     private var y = .3471
@@ -30,8 +33,26 @@ class RadarMap(context: Context) : View(context) {
 
     var place = Place.MUNICH
         set(value) {
+            val moved = field.lat != value.lat || field.lon != value.lon
             field = value
-            recenter()
+            if (!placeInitialized) {
+                placeInitialized = true
+                val saved =
+                    RadarViewport.decode(
+                        runCatching { viewportPreferences.getString("camera", null) }.getOrNull(),
+                        value,
+                    )
+                if (saved == null) recenter()
+                else {
+                    x = saved.x
+                    y = saved.y
+                    zoom = saved.zoom
+                    viewportChanged()
+                }
+            } else if (moved) {
+                recenter()
+                saveViewport()
+            }
         }
 
     var online = true
@@ -39,8 +60,6 @@ class RadarMap(context: Context) : View(context) {
         private set
 
     private var bitmap: Bitmap? = null
-    var onMapStatus: ((String) -> Unit)? = null
-    private var status = ""
     private var projectedGrid: RadarGrid? = null
     private val geographicMesh = DoubleArray(33 * 37 * 2)
     private val drawingMesh = FloatArray(33 * 37 * 2)
@@ -118,7 +137,7 @@ class RadarMap(context: Context) : View(context) {
     init {
         setBackgroundColor(Hud.bg)
         contentDescription =
-            "Precipitation map. Drag to pan, pinch or double tap to zoom. Recenter and zoom buttons are below the map."
+            "Precipitation map. Drag to pan, pinch or double tap to zoom. Zoom and recenter actions are available to accessibility services."
         isFocusable = true
         recenter()
     }
@@ -140,15 +159,27 @@ class RadarMap(context: Context) : View(context) {
     private fun viewportChanged() {
         val latitude = Math.toDegrees(atan(sinh(Math.PI * (1 - 2 * y))))
         contentDescription =
-            "Precipitation map. Center ${String.format(java.util.Locale.US,"%.6f, %.6f",latitude,x*360-180)}; zoom ${String.format(java.util.Locale.US,"%.2f",zoom)}. Drag to pan, pinch to zoom."
+            "Precipitation map. Center ${String.format(java.util.Locale.US,"%.6f, %.6f",latitude,x*360-180)}; zoom ${String.format(java.util.Locale.US,"%.2f",zoom)}. Drag to pan, pinch or double tap to zoom."
         invalidate()
     }
 
     fun recenter() {
         val c = mercator(place.lat, place.lon)
-        x = c.first
-        y = c.second
+        x = ((c.first % 1) + 1) % 1
+        y = c.second.coerceIn(0.0, 1.0)
         viewportChanged()
+    }
+
+    /**
+     * Commit only at gesture/lifecycle boundaries so a force-stop cannot discard the last camera.
+     */
+    @android.annotation.SuppressLint("ApplySharedPref")
+    fun saveViewport() {
+        if (!placeInitialized) return
+        viewportPreferences
+            .edit()
+            .putString("camera", RadarViewport(x, y, zoom).encode(place))
+            .commit()
     }
 
     fun zoomBy(amount: Double, focusX: Float = width / 2f, focusY: Float = height / 2f) {
@@ -191,14 +222,49 @@ class RadarMap(context: Context) : View(context) {
         parent.requestDisallowInterceptTouchEvent(true)
         scale.onTouchEvent(event)
         gesture.onTouchEvent(event)
-        if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL)
+        if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
             parent.requestDisallowInterceptTouchEvent(false)
+            saveViewport()
+        }
         return true
     }
 
     override fun performClick(): Boolean {
         super.performClick()
         return true
+    }
+
+    override fun onInitializeAccessibilityNodeInfo(
+        info: android.view.accessibility.AccessibilityNodeInfo
+    ) {
+        super.onInitializeAccessibilityNodeInfo(info)
+        info.addAction(
+            android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction(4096, "Zoom in")
+        )
+        info.addAction(
+            android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction(8192, "Zoom out")
+        )
+        info.addAction(
+            android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction(
+                RECENTER_ACTION,
+                "Recenter on selected location",
+            )
+        )
+    }
+
+    override fun performAccessibilityAction(action: Int, args: android.os.Bundle?): Boolean {
+        when (action) {
+            4096 -> zoomBy(1.0)
+            8192 -> zoomBy(-1.0)
+            RECENTER_ACTION -> recenter()
+            else -> return super.performAccessibilityAction(action, args)
+        }
+        saveViewport()
+        return true
+    }
+
+    private companion object {
+        const val RECENTER_ACTION = 0x01000001
     }
 
     private fun request(key: String, z: Int, tx: Int, ty: Int) {
@@ -250,8 +316,6 @@ class RadarMap(context: Context) : View(context) {
         val tile = world() / count
         val left = x * count - width / 2 / tile
         val top = y * count - height / 2 / tile
-        var missing = 0
-        var seen = 0
         p.colorFilter = dark
         p.alpha = 255
         p.style = Paint.Style.FILL
@@ -269,10 +333,8 @@ class RadarMap(context: Context) : View(context) {
                     ((iy - top + 1) * tile + 1).toFloat(),
                 )
             }
-            seen++
             if (image != null) c.drawBitmap(image, null, rect, p)
             else {
-                missing++
                 p.colorFilter = null
                 p.color = Hud.panel
                 c.drawRect(rect, p)
@@ -285,17 +347,6 @@ class RadarMap(context: Context) : View(context) {
             if (image == null) request(key, z, nx, iy)
         }
         p.colorFilter = null
-        val next =
-            when {
-                !online -> "BASEMAP · OFFLINE / CACHE"
-                missing == seen -> "BASEMAP · LOADING / UNAVAILABLE"
-                missing > 0 -> "BASEMAP · PARTIAL"
-                else -> "BASEMAP · CONNECTED"
-            }
-        if (status != next) {
-            status = next
-            post { onMapStatus?.invoke(next) }
-        }
         val f = frame
         val image = bitmap
         if (f != null && image != null) {
@@ -312,31 +363,21 @@ class RadarMap(context: Context) : View(context) {
         }
         val (px, py) = screen(place.lat, place.lon)
         p.color = Hud.cyan
+        p.alpha = 130
         p.style = Paint.Style.STROKE
         p.strokeWidth = context.dp(1).toFloat()
-        c.drawCircle(px, py, context.dp(17).toFloat(), p)
-        c.drawLine(px - context.dp(24), py, px - context.dp(10), py, p)
-        c.drawLine(px + context.dp(10), py, px + context.dp(24), py, p)
-        c.drawLine(px, py - context.dp(24), px, py - context.dp(10), p)
-        c.drawLine(px, py + context.dp(10), px, py + context.dp(24), p)
+        val inner = context.dp(7).toFloat()
+        val outer = context.dp(11).toFloat()
+        c.drawCircle(px, py, context.dp(5).toFloat(), p)
+        c.drawLine(px - outer, py, px - inner, py, p)
+        c.drawLine(px + inner, py, px + outer, py, p)
+        c.drawLine(px, py - outer, px, py - inner, p)
+        c.drawLine(px, py + inner, px, py + outer, p)
         p.style = Paint.Style.FILL
-        c.drawCircle(px, py, context.dp(4).toFloat(), p)
+        c.drawCircle(px, py, context.dp(2).toFloat(), p)
+        p.alpha = 255
         p.textSize = context.dp(11).toFloat()
         p.typeface = Typeface.MONOSPACE
-        val title = place.label.take(28).uppercase()
-        val textWidth = p.measureText(title)
-        p.color = Hud.bg
-        c.drawRoundRect(
-            px - textWidth / 2 - context.dp(7),
-            py + context.dp(26),
-            px + textWidth / 2 + context.dp(7),
-            py + context.dp(47),
-            4f,
-            4f,
-            p,
-        )
-        p.color = Hud.ink
-        c.drawText(title, px - textWidth / 2, py + context.dp(40), p)
         if (f != null && !f.grid.contains(place)) {
             p.color = Hud.bg
             c.drawRect(0f, 0f, width.toFloat(), context.dp(34).toFloat(), p)
@@ -345,14 +386,6 @@ class RadarMap(context: Context) : View(context) {
             c.drawText("Outside DWD radar coverage", width / 2f, context.dp(22).toFloat(), p)
             p.textAlign = Paint.Align.LEFT
         }
-        p.color = Hud.muted
-        p.textSize = context.dp(10).toFloat()
-        c.drawText(
-            "N  /  Z ${String.format(java.util.Locale.US,"%.1f",zoom)}",
-            context.dp(12).toFloat(),
-            height - context.dp(12).toFloat(),
-            p,
-        )
     }
 
     fun dispose() {
@@ -395,28 +428,24 @@ class RadarTimeline(context: Context) : View(context) {
 
     override fun onDraw(c: Canvas) {
         if (frames.isEmpty()) return
-        val y = height * .65f
+        val y = height * .5f
         p.color = Hud.line
-        p.strokeWidth = context.dp(3).toFloat()
+        p.strokeWidth = context.dp(2).toFloat()
         c.drawLine(pos(frames.first().time), y, pos(frames.last().time), y, p)
         frames.forEachIndexed { i, f ->
             p.color = if (i <= selected) Hud.cyan else Hud.muted
-            c.drawCircle(pos(f.time), y, context.dp(2).toFloat(), p)
+            c.drawCircle(pos(f.time), y, context.dp(1).toFloat(), p)
         }
         val now = System.currentTimeMillis()
         if (now in frames.first().time..frames.last().time) {
             p.color = Hud.amber
             p.strokeWidth = context.dp(1).toFloat()
             val x = pos(now)
-            c.drawLine(x, context.dp(23).toFloat(), x, height.toFloat(), p)
-            p.textSize = context.dp(10).toFloat()
-            p.typeface = Typeface.MONOSPACE
-            p.textAlign = Paint.Align.CENTER
-            c.drawText("NOW", x, context.dp(16).toFloat(), p)
+            c.drawLine(x, y - context.dp(7), x, y + context.dp(7), p)
         }
         p.color = Hud.cyan
         frames.getOrNull(selected)?.let {
-            c.drawCircle(pos(it.time), y, context.dp(7).toFloat(), p)
+            c.drawCircle(pos(it.time), y, context.dp(5).toFloat(), p)
         }
     }
 

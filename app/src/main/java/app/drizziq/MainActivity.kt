@@ -44,14 +44,10 @@ class MainActivity : Activity() {
     private lateinit var forecastScroll: ScrollView
     private lateinit var radarPanel: LinearLayout
     private lateinit var map: RadarMap
-    private lateinit var radarStatus: TextView
-    private lateinit var frameTime: TextView
-    private lateinit var frameType: TextView
-    private lateinit var radarMeta: TextView
+    private lateinit var radarNotice: TextView
+    private var frameError = false
     private lateinit var timeline: RadarTimeline
-    private lateinit var playButton: Button
-    private lateinit var windowLabel: TextView
-    private lateinit var mapStatus: TextView
+    private lateinit var playButton: ImageButton
     private val handler = Handler(Looper.getMainLooper())
     private val decoder = Executors.newSingleThreadExecutor()
     private val frames = object : android.util.LruCache<String, Bitmap>(3) {}
@@ -513,22 +509,30 @@ class MainActivity : Activity() {
 
     private fun createRadar() {
         radarPanel = column()
-        radarStatus = label("LOADING · DWD RADAR", 10f, Hud.muted, true)
-        radarPanel.addView(radarStatus)
-        radarPanel.space(8)
-        val frameHeader = row()
-        frameTime = label("Waiting for DWD", 22f)
-        frameHeader.addView(frameTime, LinearLayout.LayoutParams(0, -2, 1f))
-        frameType = label("", 9f, Hud.cyan, true)
-        frameHeader.addView(frameType)
-        radarPanel.addView(frameHeader)
-        radarPanel.space(8)
+        val viewport = FrameLayout(this)
         map = RadarMap(this)
-        radarPanel.addView(map, LinearLayout.LayoutParams(-1, 0, 1f))
+        viewport.addView(map, FrameLayout.LayoutParams(-1, -1))
+        radarNotice =
+            label("", 11f, Hud.amber).apply {
+                pad(8)
+                background = panel()
+                gravity = Gravity.CENTER
+                visibility = View.GONE
+                setOnClickListener {
+                    repo.refreshRadar()
+                    if (sequence != null) requestFrame(frameIndex)
+                }
+            }
+        viewport.addView(
+            radarNotice,
+            FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+                topMargin = dp(8)
+            },
+        )
         val attribution =
-            label("© OpenStreetMap contributors", 10f, Hud.muted).apply {
-                gravity = Gravity.END
-                setPadding(0, dp(4), 0, dp(4))
+            label("© OpenStreetMap contributors", 9f, Hud.muted).apply {
+                setPadding(dp(6), dp(4), dp(6), dp(4))
+                setBackgroundColor(0xCF080F19.toInt())
                 contentDescription = "OpenStreetMap attribution and licence"
                 setOnClickListener {
                     startActivity(
@@ -539,30 +543,21 @@ class MainActivity : Activity() {
                     )
                 }
             }
-        radarPanel.addView(attribution)
-        mapStatus = label("BASEMAP · CONNECTING", 9f, Hud.muted, true)
-        radarPanel.addView(mapStatus)
-        map.onMapStatus = { mapStatus.text = it }
-        radarPanel.space(6)
+        viewport.addView(
+            attribution,
+            FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END),
+        )
+        radarPanel.addView(viewport, LinearLayout.LayoutParams(-1, 0, 1f))
         val controls = row()
-        playButton = action("PLAY", "Play or pause radar animation") { setPlaying(!playing) }
-        controls.addView(
-            playButton,
-            LinearLayout.LayoutParams(0, dp(48), 1f).apply { rightMargin = dp(6) },
-        )
-        controls.addView(
-            action("−", "Zoom out") { map.zoomBy(-1.0) },
-            LinearLayout.LayoutParams(dp(48), dp(48)).apply { rightMargin = dp(6) },
-        )
-        controls.addView(
-            action("+", "Zoom in") { map.zoomBy(1.0) },
-            LinearLayout.LayoutParams(dp(48), dp(48)).apply { rightMargin = dp(6) },
-        )
-        controls.addView(
-            action("CENTER", "Recenter on selected location") { map.recenter() },
-            LinearLayout.LayoutParams(0, dp(48), 1f),
-        )
-        radarPanel.addView(controls)
+        playButton =
+            ImageButton(this).apply {
+                setImageResource(R.drawable.ic_play)
+                contentDescription = "Play or pause radar animation"
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                background = null
+                setOnClickListener { setPlaying(!playing) }
+            }
+        controls.addView(playButton, LinearLayout.LayoutParams(dp(48), dp(40)))
         timeline =
             RadarTimeline(this).apply {
                 onSelect = {
@@ -570,40 +565,63 @@ class MainActivity : Activity() {
                     requestFrame(it)
                 }
             }
-        radarPanel.addView(timeline, LinearLayout.LayoutParams(-1, dp(58)))
-        windowLabel = label("Observations → available forecast", 10f, Hud.muted, true)
-        radarPanel.addView(windowLabel)
-        radarPanel.space(8)
-        val legend = row()
+        controls.addView(
+            timeline,
+            LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(8) },
+        )
+        radarPanel.addView(controls)
+        val legend =
+            row().apply {
+                contentDescription = "Precipitation legend, millimetres per five minutes"
+            }
         for (i in 1..5) {
-            val cell = column()
+            val cell = row()
             cell.addView(
                 View(this).apply { setBackgroundColor(RadarPalette.colors[i]) },
-                LinearLayout.LayoutParams(-1, dp(4)),
+                LinearLayout.LayoutParams(dp(10), dp(3)),
             )
-            cell.space(4)
-            cell.addView(label("${RadarPalette.limits[i]}", 9f, Hud.muted, true))
-            legend.addView(cell, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = dp(3) })
+            cell.addView(
+                label("${RadarPalette.limits[i]}", 9f, Hud.muted, true),
+                LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(4) },
+            )
+            legend.addView(cell, LinearLayout.LayoutParams(0, -1, 1f))
         }
-        legend.addView(label("mm / 5 min", 9f, Hud.muted, true))
-        radarPanel.addView(legend)
-        radarPanel.space(5)
-        radarPanel.addView(label("<0.1: faint teal · hatched: no radar data", 9f, Hud.muted))
-        radarPanel.space(8)
-        radarMeta =
-            label("", 10f, Hud.muted).apply {
-                setOnClickListener { repo.refreshRadar() }
-                contentDescription = "Radar status; tap to refresh"
-            }
-        radarPanel.addView(radarMeta)
+        legend.addView(label("mm/5min", 9f, Hud.muted, true))
+        radarPanel.addView(legend, LinearLayout.LayoutParams(-1, dp(18)))
         content.addView(radarPanel, FrameLayout.LayoutParams(-1, -1))
+    }
+
+    private fun updateRadarNotice() {
+        val reading = repo.radar
+        val message =
+            when {
+                frameError -> "Radar frame unavailable"
+                reading.data == null ->
+                    if (reading.state == Freshness.ERROR) "Radar unavailable" else "Loading radar…"
+                !repo.online -> "Offline radar"
+                reading.state == Freshness.STALE -> "Radar data is stale or incomplete"
+                reading.state == Freshness.CACHED -> "Cached radar"
+                else -> null
+            }
+        radarNotice.text = message
+        radarNotice.visibility = if (message == null) View.GONE else View.VISIBLE
+    }
+
+    private fun updateRadarAccessibility() {
+        val seq = sequence
+        val frame = seq?.frames?.getOrNull(frameIndex)
+        timeline.contentDescription =
+            if (frame == null) "Radar timeline, waiting for frames"
+            else {
+                val type = if (frame.lead > 0) "FORECAST +${frame.lead}m" else "OBSERVED"
+                val previous = seq.frames.getOrNull(frameIndex - 1)
+                val gap = previous != null && frame.time - previous.time > 300000
+                "Radar frame ${Times.format(frame.time, "dd MMM HH:mm z", repo.place.zone)}, $type, ${repo.radar.state.name}, ${seq.frames.size} frames${if (gap) ", gap before frame" else ""}"
+            }
     }
 
     private fun renderRadar() {
         val reading = repo.radar
-        radarStatus.text =
-            "${reading.state.name}  /  DWD RV  ·  ${if(repo.online)"CONNECTED" else "OFFLINE"}"
-        radarStatus.setTextColor(Hud.color(reading.state))
         map.online = repo.online
         map.invalidate()
         val data = reading.data
@@ -617,20 +635,8 @@ class MainActivity : Activity() {
             requestFrame(frameIndex)
         }
         playButton.isEnabled = data != null
-        radarMeta.text =
-            listOfNotNull(
-                    data?.let {
-                        "Issue ${Times.format(it.issue,"dd MMM HH:mm")} UTC · ${it.frames.size} frames"
-                    },
-                    reading.fetched?.let {
-                        "Received ${Times.format(it,"HH:mm:ss")} UTC · tap to refresh"
-                    },
-                    if (reading.refreshing) "Receiving DWD frames…" else reading.message,
-                )
-                .joinToString("\n")
-        if (data == null)
-            frameTime.text =
-                if (reading.state == Freshness.ERROR) "Radar unavailable" else "Receiving radar…"
+        updateRadarNotice()
+        updateRadarAccessibility()
     }
 
     private fun requestFrame(index: Int) {
@@ -640,17 +646,12 @@ class MainActivity : Activity() {
         handler.removeCallbacks(advance)
         val display: (Bitmap) -> Unit = { image ->
             if (!dead && token == decodeToken) {
+                frameError = false
                 map.show(frame, image)
                 frameIndex = index
                 timeline.selected = index
-                frameTime.text = Times.format(frame.time, "dd MMM · HH:mm", repo.place.zone)
-                frameType.text = if (frame.lead > 0) "FORECAST +${frame.lead}m" else "OBSERVED"
-                val previous = seq.frames.getOrNull(index - 1)
-                val gap = previous != null && frame.time - previous.time > 300000
-                windowLabel.text =
-                    "${Times.format(seq.frames.first().time,"HH:mm",repo.place.zone)}  —  ${Times.format(seq.frames.last().time,"HH:mm z",repo.place.zone)}${if(gap)" · GAP BEFORE FRAME" else ""}"
-                timeline.contentDescription =
-                    "Radar frame ${Times.format(frame.time,"dd MMM HH:mm z",repo.place.zone)}, ${frameType.text}"
+                updateRadarAccessibility()
+                updateRadarNotice()
                 if (playing && active && radarVisible)
                     handler.postDelayed(advance, if (index == seq.frames.lastIndex) 1400 else 700)
             }
@@ -659,7 +660,8 @@ class MainActivity : Activity() {
             display(it)
             return
         }
-        frameType.text = "LOADING FRAME"
+        frameError = false
+        updateRadarNotice()
         decoder.execute {
             val image = BitmapFactory.decodeFile(frame.file)
             handler.post {
@@ -669,8 +671,8 @@ class MainActivity : Activity() {
                         display(image)
                     } else if (token == decodeToken) {
                         setPlaying(false)
-                        frameType.text = "FRAME ERROR"
-                        radarMeta.text = "Cached frame could not be read · tap to refresh"
+                        frameError = true
+                        updateRadarNotice()
                     }
                 }
             }
@@ -679,7 +681,8 @@ class MainActivity : Activity() {
 
     private fun setPlaying(value: Boolean) {
         playing = value
-        playButton.text = if (value) "PAUSE" else "PLAY"
+        playButton.isSelected = value
+        playButton.setImageResource(if (value) R.drawable.ic_pause else R.drawable.ic_play)
         handler.removeCallbacks(advance)
         if (value) handler.postDelayed(advance, 700)
     }
@@ -923,6 +926,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        map.saveViewport()
         active = false
         setPlaying(false)
         handler.removeCallbacks(tick)

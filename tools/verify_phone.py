@@ -76,6 +76,10 @@ def main():
     phase("navigation")
     phase("lifecycle")
     phase("forecast")
+    phase("radar")
+    phase("viewport-save")
+    command("shell", "am", "force-stop", "app.drizziq")
+    phase("viewport-restore")
     if args.full:
         full_checks()
     # Instrumentation can leave the launcher in front. Return to the app explicitly.

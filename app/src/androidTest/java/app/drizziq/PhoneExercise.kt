@@ -92,7 +92,7 @@ class PhoneExercise : Instrumentation() {
         }
     }
 
-    private fun pinch(x: Float, y: Float) {
+    private fun pinch(x: Float, y: Float, reverse: Boolean = false) {
         val start = SystemClock.uptimeMillis()
         val props =
             Array(2) { i ->
@@ -131,14 +131,72 @@ class PhoneExercise : Instrumentation() {
             uiAutomation.injectInputEvent(event, true)
             event.recycle()
         }
-        send(MotionEvent.ACTION_DOWN, 1, 60f)
-        send(MotionEvent.ACTION_POINTER_DOWN or (1 shl 8), 2, 60f)
+        val startDistance = targetContext.dp(if (reverse) 110 else 32).toFloat()
+        val endDistance = targetContext.dp(if (reverse) 32 else 110).toFloat()
+        send(MotionEvent.ACTION_DOWN, 1, startDistance)
+        send(MotionEvent.ACTION_POINTER_DOWN or (1 shl 8), 2, startDistance)
         for (i in 1..20) {
-            send(MotionEvent.ACTION_MOVE, 2, 60f + i * 5)
+            send(MotionEvent.ACTION_MOVE, 2, startDistance + (endDistance - startDistance) * i / 20)
             SystemClock.sleep(15)
         }
-        send(MotionEvent.ACTION_POINTER_UP or (1 shl 8), 2, 160f)
-        send(MotionEvent.ACTION_UP, 1, 160f)
+        send(MotionEvent.ACTION_POINTER_UP or (1 shl 8), 2, endDistance)
+        send(MotionEvent.ACTION_UP, 1, endDistance)
+    }
+
+    private fun radarMapNode() =
+        nodes().first {
+            it.contentDescription?.toString()?.startsWith("Precipitation map") == true
+        }
+
+    private fun radarGestures() {
+        val bounds = Rect().apply { radarMapNode().getBoundsInScreen(this) }
+        fun zoom() =
+            Regex("zoom ([0-9]+(?:\\.[0-9]+)?)")
+                .find(radarMapNode().contentDescription.toString())!!
+                .groupValues[1]
+                .toDouble()
+        // Saved camera state can start at maximum zoom. Leave headroom before asserting pinch-in.
+        while (zoom() > 10.0) {
+            val previous = zoom()
+            check(radarMapNode().performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD))
+            waitFor("zoom headroom for gesture test", 3000) { zoom() < previous }
+        }
+        val original = radarMapNode().contentDescription.toString()
+        drag(
+            bounds.centerX().toFloat(),
+            bounds.centerY().toFloat(),
+            bounds.centerX() + 100f,
+            bounds.centerY() + 80f,
+        )
+        check(radarMapNode().contentDescription.toString() != original) {
+            "One-finger pan did not move the map"
+        }
+        val beforeZoom = zoom()
+        pinch(bounds.centerX().toFloat(), bounds.centerY().toFloat())
+        check(zoom() > beforeZoom) { "Spreading fingers did not zoom in: $beforeZoom to ${zoom()}" }
+        val zoomed = zoom()
+        pinch(bounds.centerX().toFloat(), bounds.centerY().toFloat(), reverse = true)
+        check(zoom() < zoomed) { "Pinching fingers did not zoom out" }
+        val beforeDoubleTap = zoom()
+        repeat(2) {
+            val time = SystemClock.uptimeMillis()
+            for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
+                val event =
+                    MotionEvent.obtain(
+                        time,
+                        SystemClock.uptimeMillis(),
+                        action,
+                        bounds.centerX().toFloat(),
+                        bounds.centerY().toFloat(),
+                        0,
+                    )
+                event.source = InputDevice.SOURCE_TOUCHSCREEN
+                uiAutomation.injectInputEvent(event, true)
+                event.recycle()
+            }
+            SystemClock.sleep(70)
+        }
+        waitFor("double tap zoom", 3000) { zoom() > beforeDoubleTap }
     }
 
     override fun onStart() {
@@ -220,6 +278,176 @@ class PhoneExercise : Instrumentation() {
                     result.putString(
                         "checks",
                         "Places selection and content survive Activity recreation; Forecast remains reachable",
+                    )
+                }
+                "viewport-save" -> {
+                    click("Radar")
+                    val original = radarMapNode().contentDescription.toString()
+                    radarGestures()
+                    val moved = radarMapNode().contentDescription.toString()
+                    check(moved != original) { "Persistence test must change the viewport" }
+                    check(
+                        targetContext
+                            .getSharedPreferences("radar-test", 0)
+                            .edit()
+                            .putString("expected", moved)
+                            .commit()
+                    )
+                    result.putString(
+                        "checks",
+                        "panned and zoomed radar; saved independent expected viewport for force-stop check",
+                    )
+                }
+                "viewport-restore" -> {
+                    click("Radar")
+                    val expected =
+                        targetContext
+                            .getSharedPreferences("radar-test", 0)
+                            .getString("expected", null)
+                    check(expected != null) { "Run viewport-save before viewport-restore" }
+                    check(radarMapNode().contentDescription.toString() == expected) {
+                        "Viewport reset after process restart: expected $expected; got ${radarMapNode().contentDescription}"
+                    }
+                    val monitor = addMonitor(MainActivity::class.java.name, null, false)
+                    try {
+                        runOnMainSync { activity.recreate() }
+                        check(waitForMonitorWithTimeout(monitor, 10000) != null)
+                        waitForIdleSync()
+                        waitFor("radar viewport survives Activity recreation", 10000) {
+                            has("Precipitation map") &&
+                                radarMapNode().contentDescription.toString() == expected
+                        }
+                    } finally {
+                        removeMonitor(monitor)
+                    }
+                    result.putString(
+                        "checks",
+                        "radar center and fractional zoom survive force-stop/relaunch and Activity recreation",
+                    )
+                }
+                "radar-gestures" -> {
+                    click("Radar")
+                    radarGestures()
+                    result.putString(
+                        "checks",
+                        "one-finger pan; two-finger zoom in and out; double-tap zoom",
+                    )
+                }
+                "radar" -> {
+                    click("Radar")
+                    val mapBounds = Rect().apply { radarMapNode().getBoundsInScreen(this) }
+                    val tabs =
+                        nodes().first {
+                            it.contentDescription?.toString() == "Radar" && it.isClickable
+                        }
+                    val tabBounds = Rect().apply { tabs.getBoundsInScreen(this) }
+                    val coordinates =
+                        nodes().first {
+                            it.text?.toString()?.let { text ->
+                                text.contains("°N") || text.contains("°S")
+                            } == true
+                        }
+                    val coordinateBounds = Rect().apply { coordinates.getBoundsInScreen(this) }
+                    check(mapBounds.height() >= (tabBounds.top - coordinateBounds.bottom) * .75) {
+                        "Radar map must occupy at least 75% of available content height"
+                    }
+                    val text = nodes().mapNotNull { it.text?.toString() }.joinToString(" | ")
+                    for (removed in
+                        listOf(
+                            "OBSERVED",
+                            "DWD RV",
+                            "Issue ",
+                            "Received ",
+                            "tap to refresh",
+                            "hatched:",
+                            "mm / 5 min",
+                        )) {
+                        check(!text.contains(removed)) { "Removed radar text remains: $removed" }
+                    }
+                    check(!Regex("\\d{2} \\w{3} · \\d{2}:\\d{2}").containsMatchIn(text)) {
+                        "Radar date/time remains visible"
+                    }
+                    check(
+                        nodes().none {
+                            it.isClickable &&
+                                it.contentDescription?.toString() in
+                                    listOf("Zoom in", "Zoom out", "Recenter on selected location")
+                        }
+                    ) {
+                        "Map control buttons remain"
+                    }
+                    val play =
+                        nodes().first {
+                            it.contentDescription?.toString() == "Play or pause radar animation"
+                        }
+                    val playBounds = Rect().apply { play.getBoundsInScreen(this) }
+                    check(play.text.isNullOrBlank() && playBounds.width() <= targetContext.dp(48)) {
+                        "Playback must use a compact icon button"
+                    }
+                    val barBounds =
+                        Rect().apply {
+                            nodes()
+                                .first { it.className == "android.widget.SeekBar" }
+                                .getBoundsInScreen(this)
+                        }
+                    check(barBounds.height() <= targetContext.dp(40)) {
+                        "Timeline must give the removed NOW label space back to the map"
+                    }
+                    val selectedPlace = PlaceStore(targetContext).selected()
+                    val initialCenter =
+                        "Precipitation map. Center " +
+                            String.format(
+                                java.util.Locale.US,
+                                "%.6f, %.6f",
+                                selectedPlace.lat.coerceIn(-85.05112878, 85.05112878),
+                                if (selectedPlace.lon == 180.0) -180.0 else selectedPlace.lon,
+                            )
+                    radarGestures()
+                    val recenter =
+                        radarMapNode().actionList.first {
+                            it.label?.toString() == "Recenter on selected location"
+                        }
+                    check(radarMapNode().performAction(recenter.id))
+                    waitFor("accessible recenter restores selected-place center", 3000) {
+                        radarMapNode().contentDescription.toString().substringBefore("; zoom") ==
+                            initialCenter
+                    }
+                    waitFor("radar sequence", 180000) {
+                        nodes().any {
+                            it.className == "android.widget.SeekBar" &&
+                                (it.rangeInfo?.max ?: 0f) > 0f
+                        }
+                    }
+                    fun bar() = nodes().first { it.className == "android.widget.SeekBar" }
+                    drag(
+                        barBounds.left + 2f,
+                        barBounds.centerY().toFloat(),
+                        barBounds.right - 2f,
+                        barBounds.centerY().toFloat(),
+                    )
+                    waitFor("last frame selected") {
+                        bar().rangeInfo.current == bar().rangeInfo.max
+                    }
+                    click("Play or pause radar animation")
+                    check(
+                        nodes()
+                            .first {
+                                it.contentDescription?.toString() == "Play or pause radar animation"
+                            }
+                            .isSelected
+                    ) {
+                        "Play icon must reflect playback state"
+                    }
+                    waitFor("playback loops", 10000) {
+                        bar().rangeInfo.current < bar().rangeInfo.max
+                    }
+                    click("Play or pause radar animation")
+                    val paused = bar().rangeInfo.current
+                    SystemClock.sleep(1000)
+                    check(bar().rangeInfo.current == paused) { "Pause did not stop playback" }
+                    result.putString(
+                        "checks",
+                        "map fills radar view; compact icon controls; removed text; pan; pinch in/out; double tap; scrub to last frame; playback loops and pauses",
                     )
                 }
                 "forecast" -> {
@@ -330,11 +558,19 @@ class PhoneExercise : Instrumentation() {
                     val panned = viewport()
                     pinch(bounds.centerX().toFloat(), bounds.centerY().toFloat())
                     check(viewport() != panned) { "Pinch did not change viewport" }
-                    click("Recenter on selected location")
+                    val recenter =
+                        radarMapNode().actionList.first {
+                            it.label?.toString() == "Recenter on selected location"
+                        }
+                    val beforeRecenter = viewport()
+                    check(radarMapNode().performAction(recenter.id))
+                    waitFor("accessible recenter") { viewport() != beforeRecenter }
                     val centered = viewport()
-                    click("Zoom out")
+                    check(
+                        radarMapNode().performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
+                    )
                     check(viewport() != centered)
-                    click("Zoom in")
+                    check(radarMapNode().performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD))
                     val bar = nodes().first { it.className == "android.widget.SeekBar" }
                     val r = Rect()
                     bar.getBoundsInScreen(r)
@@ -347,7 +583,7 @@ class PhoneExercise : Instrumentation() {
                     click("Select favourite Munich home")
                     result.putString(
                         "checks",
-                        "live Munich; coordinate validation; live Berlin; save two favourites; radar pan; two-finger pinch; zoom buttons; recenter; scrub to +120; playback loop; select favourite",
+                        "live Munich; coordinate validation; live Berlin; save two favourites; radar pan; two-finger pinch; accessible zoom and recenter; scrub to +120; playback loop; select favourite",
                     )
                 }
                 "persistence" -> {

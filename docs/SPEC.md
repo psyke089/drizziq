@@ -19,9 +19,9 @@ The reference image `tmp/forecast.png` defines **which information** the forecas
 
 - A precipitation map that can be zoomed and panned freely.
 - Animated playback covering recent observations and the available forecast window.
-- Current frame timestamp, play/pause, timeline scrubbing, a NOW marker, and a precipitation legend.
-- A marker for the selected location and a recenter action.
-- Radar freshness and connection status.
+- The map occupies most of the available radar content area. Compact play/pause icons, timeline scrubbing with a current-time marker, and a slim precipitation legend remain below it. The play control is icon-only; no NOW label is drawn. Persist the map center and fractional zoom across app restarts and Activity recreation. Choosing different coordinates recenters the map. Current frame timestamps and observed/forecast metadata remain available to accessibility services rather than taking visual space.
+- A subtle marker for the selected location, without an in-map place label. Drag to pan, pinch in/out and double-tap to zoom; zoom/recenter accessibility actions replace visible map-control buttons.
+- Compact notices for loading, cached, stale/offline or unavailable radar. Normal live status, issue/received metadata and frame date/time are not shown as separate lines. Keep map attribution visible.
 - A free/open, keyless basemap. Show attribution only where the map licence requires it.
 
 ### Location
