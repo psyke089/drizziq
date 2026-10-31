@@ -7,14 +7,16 @@ A native Android app for one selected place: a DWD weather forecast and a zoomab
 ### Today and Week
 
 - Four square bottom tabs: Today, Week, Radar and Places. Navigation stays fixed while content scrolls; selected tab survives Activity recreation.
-- The shared header places temperature, condition icon and wind to the right of the selected location/station. Names use a smaller two-line label with end ellipsis. Missing weather fields use fixed placeholders; the summary stays above scrolling content on every tab.
-- Today contains the next 24 hours in one aligned horizontal grid, inspired by `tmp/meteoblue_hourly.png`: time/condition columns, temperature ribbon, rain bars, wind direction/speed and humidity only if supplied. Missing hours/fields remain unknown; the chart never bridges missing temperatures.
+- The taller shared header emphasizes temperature, condition icon and wind to the right of the selected location/station. Names use a smaller two-line label with end ellipsis. Missing weather fields use fixed placeholders; the summary stays above scrolling content on every tab.
+- Today contains the complete selected-place civil day (00:00 to the next midnight) in one aligned horizontal grid, inspired by `tmp/meteoblue_hourly.png`: narrower columns, bold time labels/condition icons, temperature ribbon, precipitation amount/probability, wind direction/speed, one-hour gusts and humidity only if supplied. DST days contain 23/25 actual hourly instants, with repeated times distinguished by zone. Earlier hours use an archived DWD issue covering midnight; unavailable hours/fields remain unknown; the chart never bridges missing temperatures.
 - Places starts directly with its action buttons; the selected location appears only in the shared header.
 - Today omits the explanatory missing-value paragraph. Week omits its heading, calculation footnote and partial-day labels; missing/partial totals remain unavailable.
 - Week contains a compact daily table for the next seven available days: weekday/date, condition, high/low, precipitation, wind and sunshine. Partial-day totals remain unavailable.
-- Both forecast screens retain forecast-point metadata, freshness and issue/validity/reception provenance in their footer. Device-location snapshots display their locally resolved forecast station name, independently of weather-fetch success; user-assigned/city labels are preserved.
+- Both forecast screens use the same formatted details card for forecast-point metadata, freshness, timezone and the last successful download (“Last updated”). Distance, elevation and available air pressure form a spaced metrics row. Issue/validity timestamps and the old DATA TRANSMISSION / LIVE line are removed; cached/stale states remain explicit. Device-location snapshots display their locally resolved forecast station name, independently of weather-fetch success; user-assigned/city labels are preserved.
 - Forecast refresh/cache/failure messages do not insert a banner above the content. Freshness remains in the existing footer; fatal failures are explained inside the empty-state card.
 - A thin indeterminate global download line covers weather, geocoding and viewed map tiles. Its two-dp slot remains reserved while idle; showing or hiding it cannot shift content or navigation. Overlapping requests keep it active until all transfers finish, including error/cancel cleanup.
+
+- Today includes a locally calculated sunrise/sunset card for the selected coordinates/date/zone, with generated icons, standard-horizon assumptions and explicit no-event outcomes. It works offline and outside DWD coverage. Calculation runs on an owned worker; stale results cannot overwrite a newer place/date.
 
 ### Radar view
 

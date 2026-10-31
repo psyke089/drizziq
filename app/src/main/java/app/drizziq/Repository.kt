@@ -175,6 +175,42 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
                     atomic(File(directory, "forecast-${station.id}.kmz"), bytes)
                     return result
                 }
+
+                override fun earlier(station: Station, dayStart: Long, online: Boolean): Forecast? {
+                    // MOSMIX L issues at 03/09/15/21 UTC; use the last run covering midnight.
+                    val hour = 3600000L
+                    val issue =
+                        Math.floorDiv(dayStart - hour - 3 * hour, 6 * hour) * 6 * hour + 3 * hour
+                    val name = "MOSMIX_L_${Times.format(issue, "yyyyMMddHH")}_${station.id}.kmz"
+                    val file = File(directory, name)
+                    if (file.exists()) {
+                        val cached = runCatching {
+                            file.inputStream().use { Mosmix.parseKmz(it) }
+                        }
+                            .getOrNull()
+                        if (cached?.station?.id == station.id && cached.issue == issue)
+                            return cached
+                    }
+                    if (!online || !this@Repository.online || closed.get()) return null
+                    val bytes =
+                        Http.bytes(
+                            "${Http.WEATHER}local_forecasts/mos/MOSMIX_L/single_stations/${station.id}/kml/$name",
+                            3000000,
+                        )
+                    val result = Mosmix.parseKmz(bytes.inputStream())
+                    require(result.station.id == station.id && result.issue == issue) {
+                        "Wrong historical forecast"
+                    }
+                    atomic(file, bytes)
+                    directory
+                        .listFiles()
+                        ?.filter {
+                            it.name.startsWith("MOSMIX_L_") &&
+                                System.currentTimeMillis() - it.lastModified() > 3 * 86400000L
+                        }
+                        ?.forEach { it.delete() }
+                    return result
+                }
             },
             { System.currentTimeMillis() },
         )

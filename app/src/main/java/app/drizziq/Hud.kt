@@ -84,6 +84,7 @@ fun Context.action(title: String, description: String = title, click: () -> Unit
 /** All pictograms are drawn here; there are no downloaded icon or font assets. */
 class WeatherGlyph(context: Context, var code: Int? = null, private val logo: Boolean = false) :
     View(context) {
+    var emphasized = false
     private val p = Paint(Paint.ANTI_ALIAS_FLAG)
 
     override fun onDraw(canvas: Canvas) {
@@ -93,7 +94,7 @@ class WeatherGlyph(context: Context, var code: Int? = null, private val logo: Bo
         canvas.translate((width - 100 * scale) / 2, (height - 100 * scale) / 2)
         canvas.scale(scale, scale)
         p.style = Paint.Style.STROKE
-        p.strokeWidth = 2f
+        p.strokeWidth = if (emphasized) 3.2f else 2f
         p.color = Hud.cyan
         p.strokeCap = Paint.Cap.ROUND
         if (logo) {

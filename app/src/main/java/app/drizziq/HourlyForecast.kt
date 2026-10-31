@@ -3,6 +3,7 @@ package app.drizziq
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.*
+import android.graphics.Typeface
 import android.view.Gravity
 import android.view.View
 import android.widget.*
@@ -11,38 +12,70 @@ import kotlin.math.max
 
 /** Programmatic-only native grid: one horizontal timeline keeps every weather row aligned. */
 @SuppressLint("ViewConstructor")
-class HourlyForecast(context: Context, columns: List<HourlyColumn>, zone: String) :
-    LinearLayout(context) {
+class HourlyForecast(
+    context: Context,
+    columns: List<HourlyColumn>,
+    zone: String,
+    initialOffset: Int,
+) : LinearLayout(context) {
+    private val horizontal = HorizontalScrollView(context)
+    private val highlightPaint = Paint().apply { color = 0x147CE6D2 }
+    private val track =
+        object : LinearLayout(context) {
+            init {
+                orientation = VERTICAL
+            }
+
+            override fun dispatchDraw(canvas: Canvas) {
+                super.dispatchDraw(canvas)
+                val now = System.currentTimeMillis()
+                val index = currentHourColumn(columns, now)
+                val column = columns.getOrNull(index) ?: return
+                if (now < column.time || now >= column.time + 3600000L) return
+                val left = context.dp(56) * index.toFloat()
+                canvas.drawRect(left, 0f, left + context.dp(56), height.toFloat(), highlightPaint)
+            }
+        }
+    private val highlightTick =
+        object : Runnable {
+            override fun run() {
+                track.invalidate()
+                postDelayed(this, 60000L - System.currentTimeMillis() % 60000L)
+            }
+        }
+    private var initialScrollApplied = false
+    private val requestedOffset = initialOffset
+    val timelineOffset: Int
+        get() = if (initialScrollApplied) horizontal.scrollX else requestedOffset
+
     init {
         orientation = HORIZONTAL
         contentDescription = "Hourly forecast, swipe horizontally for later hours"
         val rail = context.column()
-        val track = context.column()
-        val horizontal =
-            HorizontalScrollView(context).apply {
-                isHorizontalScrollBarEnabled = true
-                contentDescription = "Hourly forecast timeline"
-                addView(track, LayoutParams(context.dp(72) * columns.size, -2))
-            }
+        horizontal.apply {
+            isHorizontalScrollBarEnabled = true
+            contentDescription = "Hourly forecast timeline"
+            addView(track, LayoutParams(context.dp(56) * columns.size, -2))
+        }
         addView(rail, LayoutParams(context.dp(58), -2))
         addView(horizontal, LayoutParams(0, -2, 1f))
-        fun title(text: String, height: Int) {
+        fun title(metric: ForecastMetric, height: Int, unit: String = "") {
             rail.addView(
-                context.label(text, 9f, Hud.muted, true).apply {
-                    gravity = Gravity.CENTER_VERTICAL
+                ForecastMetricLabel(context, metric, unit).apply {
+                    gravity = Gravity.START or Gravity.CENTER_VERTICAL
                 },
                 LayoutParams(-1, context.dp(height)),
             )
         }
-        fun cells(height: Int, build: (HourlyColumn, Int) -> View) {
-            val row = context.row()
+        fun cells(height: Int, tag: String? = null, build: (HourlyColumn, Int) -> View) {
+            val row = context.row().apply { this.tag = tag }
             columns.forEachIndexed { i, column ->
                 row.addView(
                     build(column, i).apply {
                         if (background == null)
                             setBackgroundColor(if (i % 2 == 0) Hud.panel else Hud.bg)
                     },
-                    LayoutParams(context.dp(72), context.dp(height)),
+                    LayoutParams(context.dp(56), context.dp(height)),
                 )
             }
             track.addView(row)
@@ -52,26 +85,44 @@ class HourlyForecast(context: Context, columns: List<HourlyColumn>, zone: String
         fun number(value: Double?, digits: Int) =
             value?.takeIf { it.isFinite() }?.let { String.format(Locale.US, "%.${digits}f", it) }
                 ?: "—"
-        title("TIME", 42)
-        cells(42) { column, _ ->
-            value(Times.format(column.time, "EEE\nHH:mm", zone), Hud.muted).apply {
-                textSize = 10f
-                contentDescription = Times.format(column.time, "EEEE dd MMM HH:mm z", zone)
-            }
+        title(ForecastMetric.TIME, 40)
+        cells(40) { column, index ->
+            val local =
+                java.time.Instant.ofEpochMilli(column.time).atZone(java.time.ZoneId.of(zone))
+            val repeated = local.zone.rules.getValidOffsets(local.toLocalDateTime()).size > 1
+            value(
+                    Times.format(
+                        column.time,
+                        if (repeated) "HH:mm\nz" else "HH:mm",
+                        zone,
+                    ),
+                    Hud.ink,
+                )
+                .apply {
+                    tag = "hour-time:$index"
+                    textSize = 12f
+                    typeface = Typeface.create("monospace", Typeface.BOLD)
+                    contentDescription = Times.format(column.time, "EEEE dd MMM HH:mm z", zone)
+                    if (column.hour != null && column.time < System.currentTimeMillis()) {
+                        contentDescription = "$contentDescription, earlier DWD forecast"
+                    }
+                }
         }
-        title("SKY", 36)
-        cells(36) { column, _ ->
+        title(ForecastMetric.SKY, 42)
+        cells(42) { column, index ->
             WeatherGlyph(context, column.hour?.condition).apply {
+                tag = "hour-icon:$index"
+                emphasized = true
                 contentDescription =
                     weatherLabel(column.hour?.condition) ?: "No weather condition supplied"
             }
         }
-        title("°C", 128)
+        title(ForecastMetric.TEMPERATURE, 128, "°C")
         track.addView(
             TemperatureRibbon(context, columns),
-            LayoutParams(context.dp(72) * columns.size, context.dp(128)),
+            LayoutParams(context.dp(56) * columns.size, context.dp(128)),
         )
-        title("RAIN\nmm", 46)
+        title(ForecastMetric.RAIN, 46, "mm")
         val rainMax =
             max(
                 1.0,
@@ -96,21 +147,63 @@ class HourlyForecast(context: Context, columns: List<HourlyColumn>, zone: String
                 contentDescription = "Rain ${number(rain,1)} millimetres in the preceding hour"
             }
         }
-        title("WIND", 40)
+        if (columns.any { it.hour?.precipitationProbability != null }) {
+            title(ForecastMetric.PROBABILITY, 38, "%")
+            cells(38, "hourly-probability") { column, _ ->
+                val probability = column.hour?.precipitationProbability
+                value(if (probability == null) "—" else "${number(probability,0)}%", Hud.cyan)
+                    .apply {
+                        contentDescription =
+                            if (probability == null)
+                                context.getString(R.string.hourly_probability_unavailable)
+                            else
+                                context.getString(
+                                    R.string.hourly_probability_description,
+                                    probability,
+                                )
+                    }
+            }
+        }
+        title(ForecastMetric.DIRECTION, 40)
         cells(40) { column, _ ->
             val bearing = column.hour?.get("DD")?.takeIf { it.isFinite() && it in 0.0..360.0 }
             if (bearing == null) value("—", Hud.muted) else WindDirectionGlyph(context, bearing)
         }
-        title("km/h", 40)
+        title(ForecastMetric.WIND, 40, "km/h")
         cells(40) { column, _ ->
             value(number(column.hour?.wind, 0)).apply {
                 contentDescription = "Wind ${number(column.hour?.wind,0)} kilometres per hour"
             }
         }
+        if (columns.any { it.hour?.gust != null }) {
+            title(ForecastMetric.GUST, 38, "km/h")
+            cells(38, "hourly-gusts") { column, _ ->
+                val gust = column.hour?.gust
+                value(number(gust, 0), Hud.amber).apply {
+                    contentDescription =
+                        if (gust == null) context.getString(R.string.hourly_gust_unavailable)
+                        else context.getString(R.string.hourly_gust_description, gust)
+                }
+            }
+        }
         if (columns.any { it.hour?.humidity != null }) {
-            title("RH %", 38)
+            title(ForecastMetric.HUMIDITY, 38, "%")
             cells(38) { column, _ -> value(number(column.hour?.humidity, 0), Hud.cyan) }
         }
+        horizontal.post {
+            horizontal.scrollTo(initialOffset, 0)
+            initialScrollApplied = true
+        }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        highlightTick.run()
+    }
+
+    override fun onDetachedFromWindow() {
+        removeCallbacks(highlightTick)
+        super.onDetachedFromWindow()
     }
 }
 

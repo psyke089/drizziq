@@ -2,18 +2,27 @@ package app.drizziq
 
 import java.util.Locale
 
-/** One UTC hour per column; absent source hours remain explicitly unknown. */
+/** A complete local civil day, including earlier DWD issues where available. */
 data class HourlyColumn(val time: Long, val hour: Hour?)
 
-fun hourlyColumns(forecast: Forecast, now: Long): List<HourlyColumn> {
-    val upcoming = forecast.hours.filter { it.time >= now }.sortedBy { it.time }
-    if (upcoming.isEmpty()) return emptyList()
-    val byTime = upcoming.associateBy { it.time }
-    val first = upcoming.first().time
-    return (0 until 24)
-        .map { first + it * 3600000L }
-        .takeWhile { it <= upcoming.last().time }
-        .map { HourlyColumn(it, byTime[it]) }
+fun currentHourColumn(columns: List<HourlyColumn>, now: Long): Int =
+    columns.indexOfLast { it.time <= now }.coerceAtLeast(0)
+
+fun hourlyColumns(forecast: Forecast, now: Long, zone: String): List<HourlyColumn> {
+    val tz = java.time.ZoneId.of(zone)
+    val date = java.time.Instant.ofEpochMilli(now).atZone(tz).toLocalDate()
+    val start = date.atStartOfDay(tz).toInstant().toEpochMilli()
+    val end = date.plusDays(1).atStartOfDay(tz).toInstant().toEpochMilli()
+    val byTime = (forecast.earlier + forecast.hours).associateBy { it.time }
+    val times = sortedSetOf(start)
+    var time = Math.floorDiv(start, 3600000L) * 3600000L + 3600000L
+    while (time < end) {
+        times += time
+        time += 3600000L
+    }
+    // Preserve real source validity instants in fractional-offset zones; never round/interpolate.
+    forecast.hours.filter { it.time >= start && it.time < end }.forEach { times += it.time }
+    return times.map { HourlyColumn(it, byTime[it]) }
 }
 
 /** Device snapshots use the resolved forecast-point name; user labels keep their meaning. */

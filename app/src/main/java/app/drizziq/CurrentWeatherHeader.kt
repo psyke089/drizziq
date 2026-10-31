@@ -9,16 +9,29 @@ import android.widget.LinearLayout
 /** Compact shared weather summary; every field keeps its slot while data is unavailable. */
 class CurrentWeatherHeader(context: Context) : LinearLayout(context) {
     private val temperature =
-        context.label("—", 32f).apply {
+        context.label("—", 42f).apply {
             tag = "header-temperature"
-            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+            if (android.os.Build.VERSION.SDK_INT >= 26)
+                setAutoSizeTextTypeUniformWithConfiguration(
+                    32,
+                    42,
+                    1,
+                    android.util.TypedValue.COMPLEX_UNIT_SP,
+                )
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
             maxLines = 1
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
         }
-    private val condition = WeatherGlyph(context).apply { tag = "header-condition" }
+    private val condition =
+        WeatherGlyph(context).apply {
+            tag = "header-condition"
+            emphasized = true
+        }
     private val direction = FrameLayout(context)
     private val wind =
-        context.label("—", 12f, Hud.ink, true).apply {
+        context.label("—", 16f, Hud.ink, true).apply {
+            tag = "header-wind-speed"
+            typeface = Typeface.create("monospace", Typeface.BOLD)
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
         }
     private var lastHour: Hour? = null
@@ -29,12 +42,12 @@ class CurrentWeatherHeader(context: Context) : LinearLayout(context) {
         tag = "header-weather"
         orientation = VERTICAL
         gravity = Gravity.CENTER_VERTICAL
-        minimumHeight = context.dp(80)
+        minimumHeight = context.dp(112)
         val top = context.row()
         top.addView(temperature, LayoutParams(0, -2, 1f))
         top.addView(
             condition,
-            LayoutParams(context.dp(42), context.dp(42)).apply { leftMargin = context.dp(4) },
+            LayoutParams(context.dp(60), context.dp(60)).apply { leftMargin = context.dp(4) },
         )
         addView(top, LayoutParams(-1, -2))
         val bottom =
@@ -42,9 +55,9 @@ class CurrentWeatherHeader(context: Context) : LinearLayout(context) {
                 tag = "header-wind"
                 gravity = Gravity.END or Gravity.CENTER_VERTICAL
             }
-        bottom.addView(direction, LayoutParams(context.dp(32), context.dp(32)))
+        bottom.addView(direction, LayoutParams(context.dp(44), context.dp(44)))
         bottom.addView(wind, LayoutParams(-2, -2).apply { leftMargin = context.dp(4) })
-        addView(bottom, LayoutParams(-1, context.dp(32)))
+        addView(bottom, LayoutParams(-1, context.dp(44)))
     }
 
     fun bind(hour: Hour?, state: Freshness, zone: String) {

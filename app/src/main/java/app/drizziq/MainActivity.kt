@@ -18,9 +18,10 @@ import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.widget.*
+import java.time.LocalDate
 import java.util.Locale
 import java.util.TimeZone
-import java.util.concurrent.Executors
+import java.util.concurrent.*
 import kotlin.math.abs
 
 class MainActivity : Activity() {
@@ -38,6 +39,8 @@ class MainActivity : Activity() {
     private lateinit var progressLine: ProgressBar
     private var progressSubscription: Cancel? = null
     private val forecastOffsets = mutableMapOf<Page, Int>()
+    private var hourlyView: HourlyForecast? = null
+    private var hourlyKey: Pair<Place, String>? = null
 
     private enum class Page {
         TODAY,
@@ -69,6 +72,30 @@ class MainActivity : Activity() {
     private var dead = false
     private var forecastVersion: Reading<Forecast>? = null
     private var lastForecastPlace: Place? = null
+    private var lastForecastDay: String? = null
+
+    private data class SolarKey(
+        val lat: Double,
+        val lon: Double,
+        val zone: String,
+        val date: LocalDate,
+    )
+
+    private val solarWorker =
+        ThreadPoolExecutor(
+            1,
+            1,
+            0L,
+            TimeUnit.MILLISECONDS,
+            ArrayBlockingQueue(1),
+            ThreadPoolExecutor.DiscardOldestPolicy(),
+        )
+    private val solarGeneration = RequestGeneration()
+    private var solarFuture: Future<*>? = null
+    private var solarKey: SolarKey? = null
+    private var solarDay: SolarDay? = null
+    private var solarFailed = false
+    private var sunriseCard: SunriseCard? = null
     private var lastRefresh = 0L
     private val networkCallback =
         object : ConnectivityManager.NetworkCallback() {
@@ -198,7 +225,7 @@ class MainActivity : Activity() {
         val location =
             row().apply {
                 setPadding(dp(20), 0, dp(20), 0)
-                minimumHeight = dp(80)
+                minimumHeight = dp(112)
             }
         val placeColumn = column()
         placeTitle =
@@ -217,7 +244,7 @@ class MainActivity : Activity() {
         currentWeather = CurrentWeatherHeader(this)
         location.addView(
             currentWeather,
-            LinearLayout.LayoutParams(dp(140), -2).apply { leftMargin = dp(12) },
+            LinearLayout.LayoutParams(dp(180), -2).apply { leftMargin = dp(12) },
         )
         root.addView(location)
         placeCredit =
@@ -233,7 +260,7 @@ class MainActivity : Activity() {
             ScrollView(this).apply {
                 isFillViewport = true
                 clipToPadding = false
-                setPadding(dp(20), 0, dp(20), 0)
+                setPadding(dp(20), 0, 0, 0)
             }
         content.addView(forecastScroll, FrameLayout.LayoutParams(-1, -1))
         createRadar()
@@ -283,10 +310,22 @@ class MainActivity : Activity() {
         val forecast = data.data
         val place = repo.place
         val state = data.state
-        val body = column()
+        val now = System.currentTimeMillis()
+        val key = place to Times.day(now, place.zone)
+        val hourlyOffset = hourlyView?.takeIf { hourlyKey == key }?.timelineOffset
+        hourlyView = null
+        hourlyKey = key
+        val body =
+            column().apply {
+                setPadding(0, 0, dp(20), 0)
+                clipToPadding = false
+                clipChildren = false
+            }
         forecastScroll.removeAllViews()
         forecastScroll.addView(body)
-        val now = System.currentTimeMillis()
+        lastForecastDay = Times.day(now, place.zone)
+        sunriseCard = null
+        ensureSolar(place, now)
         if (forecast == null) {
             val empty =
                 column().apply {
@@ -318,80 +357,76 @@ class MainActivity : Activity() {
             empty.space(24)
             empty.addView(action("RETRY") { refresh() })
             body.addView(empty)
+            if (page != Page.WEEK) {
+                body.space(16)
+                addSunriseCard(body, place)
+            }
             return
         }
-        if (page != Page.WEEK) buildHourly(body, forecast, place, now)
+        if (page != Page.WEEK) buildHourly(body, forecast, place, now, hourlyOffset)
         else buildWeek(body, forecast, place, now)
-        body.space(20)
-        val footer =
-            column().apply {
-                pad(14)
-                background = panel()
-            }
-        footer.addView(
-            label("${forecast.station.name} / ${forecast.station.id}", 10f, Hud.muted, true)
-        )
-        footer.space(6)
-        footer.addView(
-            label(
-                "Nearest forecast point · ${number(forecast.station.distance(place),1)} km away" +
-                    (forecast.station.elevation?.let { " · ${number(it,0)} m elevation" } ?: ""),
-                11f,
-                Hud.muted,
-            )
-        )
-        footer.space(5)
-        footer.addView(
-            label(
-                "Station ${coords(forecast.station.lat,forecast.station.lon)}",
-                10f,
-                Hud.muted,
-                true,
-            )
-        )
-        forecast.current(now)?.let { hour ->
-            footer.space(6)
-            footer.addView(
-                label(
-                    "Valid ${Times.format(hour.time,"EEE dd MMM, HH:mm z",place.zone)}",
-                    11f,
-                    Hud.muted,
-                )
-            )
+        if (page != Page.WEEK) {
+            body.space(16)
+            addSunriseCard(body, place)
         }
-        footer.space(12)
-        footer.addView(label("DATA TRANSMISSION  /  ${state.name}", 10f, Hud.color(state), true))
-        footer.space(8)
-        footer.addView(
-            label(
-                "Issue  ${Times.format(forecast.issue,"dd MMM HH:mm")} UTC\nValid  ${Times.format(forecast.hours.first().time,"dd MMM HH:mm")} – ${Times.format(forecast.hours.last().time,"dd MMM HH:mm")} UTC",
-                11f,
-                Hud.muted,
-                true,
-            )
-        )
-        data.fetched?.let {
-            footer.space(6)
-            footer.addView(
-                label("Received ${Times.format(it,"dd MMM HH:mm:ss")} UTC", 11f, Hud.muted, true)
-            )
-        }
-        footer.space(10)
-        footer.addView(
-            action(if (data.refreshing) "REFRESHING…" else "REFRESH DWD") { refresh() }
-                .apply { isEnabled = !data.refreshing }
-        )
-        body.addView(footer)
+        body.space(16)
+        body.addView(ForecastDetailsCard(this, data, place) { refresh() })
         body.space(12)
         forecastScroll.post { forecastScroll.scrollTo(0, scroll) }
     }
 
-    private fun buildHourly(body: LinearLayout, forecast: Forecast, place: Place, now: Long) {
-        val columns = hourlyColumns(forecast, now)
-        body.addView(section("HOURLY FORECAST", "NEXT 24 HOURS"))
+    private fun ensureSolar(place: Place, now: Long) {
+        val key =
+            SolarKey(place.lat, place.lon, place.zone, LocalDate.parse(Times.day(now, place.zone)))
+        if (key == solarKey) return
+        solarFuture?.cancel(true)
+        solarWorker.queue.clear()
+        val token = solarGeneration.next()
+        solarKey = key
+        solarDay = null
+        solarFailed = false
+        sunriseCard?.bind(null, place.zone)
+        solarFuture = solarWorker.submit {
+            val result = runCatching { SolarCalculator.calculate(place, key.date) }
+            handler.post {
+                if (!dead && solarGeneration.isCurrent(token) && solarKey == key) {
+                    solarDay = result.getOrNull()
+                    solarFailed = result.isFailure
+                    sunriseCard?.bind(solarDay, key.zone, solarFailed)
+                }
+            }
+        }
+    }
+
+    private fun addSunriseCard(body: LinearLayout, place: Place) {
+        sunriseCard = SunriseCard(this).apply { bind(solarDay, place.zone, solarFailed) }
+        body.addView(sunriseCard)
+    }
+
+    private fun buildHourly(
+        body: LinearLayout,
+        forecast: Forecast,
+        place: Place,
+        now: Long,
+        offset: Int?,
+    ) {
+        val columns = hourlyColumns(forecast, now, place.zone)
+        body.addView(label(Times.format(now, "EEEE, dd MMM yyyy", place.zone), 12f, Hud.cyan, true))
         body.space(12)
-        if (columns.isEmpty()) body.addView(label("No upcoming hourly forecast", 13f, Hud.muted))
-        else body.addView(HourlyForecast(this, columns, place.zone))
+        if (columns.isEmpty()) body.addView(label("No hourly forecast for today", 13f, Hud.muted))
+        else {
+            hourlyView =
+                HourlyForecast(
+                    this,
+                    columns,
+                    place.zone,
+                    offset ?: dp(56) * currentHourColumn(columns, now),
+                )
+            body.addView(
+                hourlyView,
+                LinearLayout.LayoutParams(-1, -2).apply { rightMargin = -dp(20) },
+            )
+        }
     }
 
     private fun buildWeek(body: LinearLayout, forecast: Forecast, place: Place, now: Long) {
@@ -413,16 +448,25 @@ class MainActivity : Activity() {
                 setPadding(0, dp(12), 0, dp(12))
                 setBackgroundColor(Hud.panel)
             }
-        cell(head, "DAY", 1.35f, Hud.muted, 9f)
-        cell(head, "", .7f)
-        for ((name, weight) in
+        head.addView(
+            ForecastMetricLabel(this, ForecastMetric.TIME),
+            LinearLayout.LayoutParams(0, dp(38), 1.35f),
+        )
+        head.addView(
+            ForecastMetricLabel(this, ForecastMetric.SKY),
+            LinearLayout.LayoutParams(0, dp(38), .7f),
+        )
+        for ((metric, unit, weight) in
             listOf(
-                "HIGH" to .8f,
-                "LOW" to .8f,
-                "RAIN\nmm" to 1f,
-                "WIND\nkm/h" to 1f,
-                "SUN\nh" to .8f,
-            )) cell(head, name, weight, Hud.muted, 9f)
+                Triple(ForecastMetric.HIGH, "°C", .8f),
+                Triple(ForecastMetric.LOW, "°C", .8f),
+                Triple(ForecastMetric.RAIN, "mm", 1f),
+                Triple(ForecastMetric.WIND, "km/h", 1f),
+                Triple(ForecastMetric.SUN, "h", .8f),
+            )) head.addView(
+            ForecastMetricLabel(this, metric, unit),
+            LinearLayout.LayoutParams(0, dp(38), weight),
+        )
         body.addView(head)
         for (day in days) {
             val row = row().apply { setPadding(0, dp(14), 0, dp(14)) }
@@ -615,6 +659,7 @@ class MainActivity : Activity() {
     }
 
     private fun showPage(value: Page) {
+        if (value == Page.TODAY && page != Page.TODAY) hourlyView = null
         if (page == Page.TODAY || page == Page.WEEK) forecastOffsets[page] = forecastScroll.scrollY
         page = value
         radarVisible = value == Page.RADAR
@@ -639,6 +684,7 @@ class MainActivity : Activity() {
 
     private fun render() {
         repo.age()
+        ensureSolar(repo.place, System.currentTimeMillis())
         placeTitle.text = placeDisplayName(repo.place, repo.forecastPoint?.station)
         coordinates.text = coords(repo.place.lat, repo.place.lon)
         currentWeather.bind(
@@ -650,7 +696,11 @@ class MainActivity : Activity() {
         if (repo.place.geocodeId != null) placeCredit.text = placeCreditText(repo.place)
         connection.text = if (repo.online) "DWD / ONLINE" else "OFFLINE"
         connection.setTextColor(if (repo.online) Hud.cyan else Hud.amber)
-        if (forecastVersion != repo.forecast || lastForecastPlace != repo.place) {
+        if (
+            forecastVersion != repo.forecast ||
+                lastForecastPlace != repo.place ||
+                lastForecastDay != Times.day(System.currentTimeMillis(), repo.place.zone)
+        ) {
             forecastVersion = repo.forecast
             lastForecastPlace = repo.place
             buildForecast()
@@ -870,6 +920,9 @@ class MainActivity : Activity() {
 
     override fun onStop() {
         placeChoices.foreground(false)
+        solarGeneration.next()
+        solarFuture?.cancel(true)
+        solarKey = null
         super.onStop()
     }
 
@@ -918,6 +971,9 @@ class MainActivity : Activity() {
         map.dispose()
         repo.close()
         decoder.shutdownNow()
+        solarGeneration.next()
+        solarFuture?.cancel(true)
+        solarWorker.shutdownNow()
         frames.evictAll()
         super.onDestroy()
     }

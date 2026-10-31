@@ -110,6 +110,16 @@ data class Hour(val time: Long, val values: Map<String, Double>) {
     val wind
         get() = get("FF")?.times(3.6)
 
+    val pressure: Double?
+        get() = get("PPPP")?.takeIf { it.isFinite() && it > 0 }?.div(100.0)
+
+    val precipitationProbability: Double?
+        get() = get("R101")?.takeIf { it.isFinite() && it in 0.0..100.0 }
+
+    val gust: Double?
+        get() =
+            get("FX1")?.takeIf { it.isFinite() && it >= 0 }?.times(3.6)?.takeIf { it.isFinite() }
+
     val condition
         get() = get("ww")?.toInt()
 
@@ -148,7 +158,25 @@ data class Day(val time: Long, val hours: List<Hour>, val complete: Boolean) {
                 ?.condition
 }
 
-data class Forecast(val station: Station, val issue: Long, val hours: List<Hour>) {
+data class Forecast(
+    val station: Station,
+    val issue: Long,
+    val hours: List<Hour>,
+    val earlier: List<Hour> = emptyList(),
+) {
+    fun withEarlierHours(other: Forecast): Forecast {
+        if (other.station.id != station.id || other.issue > issue) return this
+        val first = hours.minOfOrNull { it.time } ?: return this
+        return copy(
+            earlier =
+                (other.earlier + other.hours + earlier)
+                    .associateBy { it.time }
+                    .values
+                    .filter { it.time < first }
+                    .sortedBy { it.time }
+        )
+    }
+
     fun current(now: Long): Hour? =
         hours.minByOrNull { abs(it.time - now) }?.takeIf { abs(it.time - now) <= 3600000 }
 
@@ -211,7 +239,23 @@ fun weatherLabel(code: Int?): String? =
 
 object Mosmix {
     private val fields =
-        setOf("TTT", "TX", "TN", "ww", "FF", "DD", "RR1c", "SunD1", "RF", "RELH", "Td", "N")
+        setOf(
+            "TTT",
+            "TX",
+            "TN",
+            "ww",
+            "FF",
+            "DD",
+            "RR1c",
+            "SunD1",
+            "RF",
+            "RELH",
+            "Td",
+            "N",
+            "R101",
+            "FX1",
+            "PPPP",
+        )
 
     fun parseKmz(input: InputStream): Forecast =
         ZipInputStream(input).use { zip ->

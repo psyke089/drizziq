@@ -228,6 +228,189 @@ class PhoneExercise : Instrumentation() {
                 )
             waitFor("initial app") { has("PLACES") }
             when (phase) {
+                "hourly-refresh" -> {
+                    fun views(root: android.view.View): List<android.view.View> =
+                        listOf(root) +
+                            if (root is android.view.ViewGroup)
+                                (0 until root.childCount).flatMap { views(root.getChildAt(it)) }
+                            else emptyList()
+                    fun timeline(): android.widget.HorizontalScrollView =
+                        views(activity.window.decorView)
+                            .filterIsInstance<android.widget.HorizontalScrollView>()
+                            .first()
+                    fun refresh(): android.widget.Button =
+                        views(activity.window.decorView.findViewWithTag("forecast-details"))
+                            .filterIsInstance<android.widget.Button>()
+                            .first()
+                    click("Week")
+                    click("Today")
+                    waitFor("hourly table") {
+                        has("Temperature ") && has("Hourly forecast timeline")
+                    }
+                    waitFor("initial hour scroll") {
+                        var positioned = false
+                        runOnMainSync {
+                            positioned =
+                                timeline().scrollX > 0 ||
+                                    Times.format(
+                                        System.currentTimeMillis(),
+                                        "HH",
+                                        PlaceStore(targetContext).selected().zone,
+                                    ) == "00"
+                        }
+                        positioned
+                    }
+                    val date =
+                        Times.format(
+                            System.currentTimeMillis(),
+                            "EEEE, dd MMM yyyy",
+                            PlaceStore(targetContext).selected().zone,
+                        )
+                    check(has(date) && !has("HOURLY FORECAST") && !has("00:00–24:00"))
+                    waitFor("ready to refresh", 30000) {
+                        var ready = false
+                        runOnMainSync { ready = refresh().isEnabled }
+                        ready
+                    }
+                    var offset = 0
+                    runOnMainSync {
+                        val bounds = Rect()
+                        timeline().getGlobalVisibleRect(bounds)
+                        check(bounds.right == activity.window.decorView.width) {
+                            "Hourly table must reach the right edge"
+                        }
+                        timeline().scrollTo(targetContext.dp(112), 0)
+                        offset = timeline().scrollX
+                        refresh().performClick()
+                    }
+                    waitFor("refresh complete", 30000) {
+                        var ready = false
+                        runOnMainSync { ready = refresh().isEnabled && timeline().width > 0 }
+                        ready
+                    }
+                    waitForIdleSync()
+                    runOnMainSync {
+                        check(timeline().scrollX == offset) { "Refresh moved the hourly table" }
+                    }
+                    result.putString(
+                        "checks",
+                        "opens at current hour; date heading; right edge; horizontal offset retained through refresh",
+                    )
+                }
+                "day-forecast" -> {
+                    fun views(root: android.view.View): List<android.view.View> =
+                        listOf(root) +
+                            if (root is android.view.ViewGroup)
+                                (0 until root.childCount).flatMap { views(root.getChildAt(it)) }
+                            else emptyList()
+                    fun cardTexts(): List<String> {
+                        var texts = listOf<String>()
+                        runOnMainSync {
+                            val card =
+                                activity.window.decorView.findViewWithTag<android.view.View>(
+                                    "forecast-details"
+                                )
+                            if (card != null)
+                                texts =
+                                    views(card).filterIsInstance<android.widget.TextView>().map {
+                                        it.text.toString()
+                                    }
+                        }
+                        return texts
+                    }
+                    click("Today")
+                    waitFor("current forecast") { has("Temperature ") }
+                    var prominent = false
+                    runOnMainSync {
+                        val weather =
+                            activity.window.decorView.findViewWithTag<android.view.View>(
+                                "header-weather"
+                            )
+                        val temp =
+                            activity.window.decorView.findViewWithTag<android.widget.TextView>(
+                                "header-temperature"
+                            )
+                        prominent =
+                            weather.height >= targetContext.dp(108) &&
+                                temp.textSize >=
+                                    android.util.TypedValue.applyDimension(
+                                        android.util.TypedValue.COMPLEX_UNIT_SP,
+                                        38f,
+                                        activity.resources.displayMetrics,
+                                    )
+                    }
+                    check(prominent) { "Header weather needs more height and a larger temperature" }
+                    check(
+                        has(
+                            Times.format(
+                                System.currentTimeMillis(),
+                                "EEEE, dd MMM yyyy",
+                                PlaceStore(targetContext).selected().zone,
+                            )
+                        ) && !has("NEXT 24 HOURS")
+                    )
+                    var columnsFit = false
+                    var dataRows = false
+                    runOnMainSync {
+                        val first =
+                            activity.window.decorView.findViewWithTag<android.widget.TextView>(
+                                "hour-time:0"
+                            )
+                        columnsFit =
+                            first != null &&
+                                first.text.toString().contains("00:00") &&
+                                first.width <= targetContext.dp(56) &&
+                                first.typeface.isBold
+                        dataRows =
+                            activity.window.decorView.findViewWithTag<android.view.View>(
+                                "hourly-probability"
+                            ) != null &&
+                                activity.window.decorView.findViewWithTag<android.view.View>(
+                                    "hourly-gusts"
+                                ) != null
+                    }
+                    check(columnsFit) {
+                        "Day columns must start at midnight, be narrower and have bold time labels"
+                    }
+                    check(dataRows) { "Available precipitation probability and gusts are missing" }
+                    waitFor("calculated sunrise and sunset", 10000) {
+                        has("Sunrise ") && has("Sunset ")
+                    }
+                    waitFor("stable forecast details", 90000) {
+                        var ready = false
+                        runOnMainSync {
+                            val card =
+                                activity.window.decorView.findViewWithTag<android.view.View>(
+                                    "forecast-details"
+                                )
+                            ready =
+                                card != null &&
+                                    views(card).filterIsInstance<android.widget.Button>().any {
+                                        it.text.toString() == "REFRESH DWD" && it.isEnabled
+                                    }
+                        }
+                        ready
+                    }
+                    val today = cardTexts()
+                    check(today.isNotEmpty() && today.none { it.contains("DATA TRANSMISSION") })
+                    check(today.any { it == "Timezone" } && today.any { it == "Last updated" })
+                    check(today.none { it in listOf("Issue", "Valid", "Received") })
+                    click("Week")
+                    waitFor("week table") {
+                        has("Maximum temperature") && has("Minimum temperature")
+                    }
+                    check(today == cardTexts()) {
+                        "Forecast details must be identical in Today and Week"
+                    }
+                    check(!has("Sunrise ") && !has("Sunset ")) {
+                        "Solar card belongs only to Today"
+                    }
+                    click("Today")
+                    result.putString(
+                        "checks",
+                        "larger header weather; narrower bold midnight-to-midnight columns; precipitation probability and gust rows; local sunrise/sunset card; identical formatted details in Today/Week without DATA TRANSMISSION",
+                    )
+                }
                 "header-weather" -> {
                     click("Today")
                     waitFor("current weather") { has("Temperature ") }
@@ -396,7 +579,9 @@ class PhoneExercise : Instrumentation() {
                         "Today explanation remains"
                     }
                     click("Week")
-                    waitFor("weekly rows") { has("HIGH") && has("LOW") }
+                    waitFor("weekly rows") {
+                        has("Maximum temperature") && has("Minimum temperature")
+                    }
                     check(
                         texts().none {
                             it.contains("WEEK AHEAD") ||
@@ -495,11 +680,13 @@ class PhoneExercise : Instrumentation() {
                         transfer.cancel()
                     }
                     click("Week")
-                    waitFor("week forecast") { has("HIGH") && has("LOW") }
+                    waitFor("week forecast") {
+                        has("Maximum temperature") && has("Minimum temperature")
+                    }
                     check(!contentHasTemperature(activity)) {
                         "Right-now card leaked into Week content"
                     }
-                    check(has("HIGH") && has("LOW"))
+                    check(has("Maximum temperature") && has("Minimum temperature"))
                     click("Places")
                     check(
                         !has("SELECTED COORDINATES") &&
@@ -581,7 +768,11 @@ class PhoneExercise : Instrumentation() {
                     click("Cancel")
                     check(tab("Places").isSelected && has("FAVOURITES"))
                     click("Week")
-                    check(tab("Week").isSelected && has("HIGH") && has("LOW"))
+                    check(
+                        tab("Week").isSelected &&
+                            has("Maximum temperature") &&
+                            has("Minimum temperature")
+                    )
                     click("Radar")
                     check(tab("Radar").isSelected && has("Play or pause radar animation"))
                     click("Today")
@@ -754,6 +945,9 @@ class PhoneExercise : Instrumentation() {
                         }
                         check(!has("Temperature ")) {
                             "Previous place weather leaked outside coverage"
+                        }
+                        waitFor("sun times outside DWD coverage", 10000) {
+                            has("Sunrise ") && has("Sunset ")
                         }
                         click("Radar")
                         check(has("Precipitation map"))
@@ -1098,14 +1292,19 @@ class PhoneExercise : Instrumentation() {
                 "forecast" -> {
                     click("Today")
                     waitFor("today forecast") { has("Temperature ") }
-                    check(!has("HIGH") && !has("LOW"))
+                    check(!has("Maximum temperature") && !has("Minimum temperature"))
                     fun scroll(): AccessibilityNodeInfo =
                         nodes().first { it.className == "android.widget.ScrollView" }
-                    check(has("HOURLY FORECAST") && has("NEXT 24 HOURS"))
-                    repeat(4) {
-                        scroll().performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
-                        SystemClock.sleep(150)
-                    }
+                    check(
+                        !has("HOURLY FORECAST") &&
+                            has(
+                                Times.format(
+                                    System.currentTimeMillis(),
+                                    "EEEE, dd MMM yyyy",
+                                    PlaceStore(targetContext).selected().zone,
+                                )
+                            )
+                    )
                     val hourly =
                         nodes().firstOrNull {
                             it.className == "android.widget.HorizontalScrollView"
@@ -1115,14 +1314,20 @@ class PhoneExercise : Instrumentation() {
                         hourly.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
                         SystemClock.sleep(120)
                     }
+                    repeat(4) {
+                        scroll().performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                        SystemClock.sleep(150)
+                    }
                     waitFor("hourly provenance footer") {
-                        has("DATA TRANSMISSION") && has("Issue") && has("Received")
+                        has("Timezone") && has("Last updated")
                     }
                     check(!has("no DWD value") && !has("Relative humidity is not supplied")) {
                         "Removed hourly explanation remains"
                     }
                     click("Week")
-                    waitFor("week ahead") { has("HIGH") && has("LOW") }
+                    waitFor("week ahead") {
+                        has("Maximum temperature") && has("Minimum temperature")
+                    }
                     check(!contentHasTemperature(activity) && !has("HOURLY FORECAST"))
                     repeat(8) {
                         scroll().performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
@@ -1136,7 +1341,7 @@ class PhoneExercise : Instrumentation() {
                     check(has(Times.format(last.timeInMillis, "dd MMM", zone))) {
                         "Seventh forecast day is not reachable"
                     }
-                    check(has("Issue") && has("Received"))
+                    check(has("Timezone") && has("Last updated"))
                     val monitor = addMonitor(MainActivity::class.java.name, null, false)
                     try {
                         runOnMainSync { activity.recreate() }

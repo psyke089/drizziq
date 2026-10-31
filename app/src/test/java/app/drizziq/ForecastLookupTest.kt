@@ -51,6 +51,16 @@ class ForecastLookupTest {
         var requests = 0
         var lastStation: String? = null
         var complete: (() -> Unit)? = null
+        var historical: Forecast? = null
+        var historyFailure = false
+        var historyRequested = false
+
+        override fun earlier(station: Station, dayStart: Long, online: Boolean): Forecast? {
+            if (!online) return null
+            historyRequested = true
+            if (historyFailure) throw java.io.IOException()
+            return historical
+        }
 
         override fun cached(station: Station): CachedForecast? {
             reads++
@@ -64,6 +74,34 @@ class ForecastLookupTest {
             complete?.invoke()
             if (failure) throw java.io.IOException()
             return fetched!!
+        }
+    }
+
+    @Test
+    fun archivedForecast_isAddedAfterLatestPublication_andFailureKeepsLatestLive() {
+        val now = java.time.Instant.parse("2026-10-31T12:00:00Z").toEpochMilli()
+        val midnight = java.time.Instant.parse("2026-10-30T23:00:00Z").toEpochMilli()
+        val latest = Forecast(point, now - 3600000, listOf(Hour(now, mapOf("TTT" to 280.0))))
+        val past = Hour(midnight, mapOf("TTT" to 275.0))
+        for (failure in listOf(false, true)) {
+            val source =
+                Source().apply {
+                    fetched = latest
+                    historical = Forecast(point, midnight - 7200000, listOf(past))
+                    historyFailure = failure
+                }
+            val readings = mutableListOf<Reading<Forecast>>()
+            ForecastLookup({ StationIndex(listOf(point)) }, source, { now }).load(Place.MUNICH) {
+                if (readings.isEmpty()) assertFalse(source.historyRequested)
+                readings += it
+            }
+            assertTrue(source.historyRequested)
+            assertEquals(Freshness.LIVE, readings.last().state)
+            assertEquals(latest.issue, readings.last().data!!.issue)
+            assertEquals(
+                if (failure) emptyList<Hour>() else listOf(past),
+                readings.last().data!!.earlier,
+            )
         }
     }
 

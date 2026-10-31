@@ -6,6 +6,8 @@ interface ForecastSource {
     fun cached(station: Station): CachedForecast?
 
     fun fetch(station: Station): Forecast
+
+    fun earlier(station: Station, dayStart: Long, online: Boolean): Forecast? = null
 }
 
 /** Worker-side resolution and cache policy, independent of Android and the UI owner. */
@@ -47,6 +49,20 @@ class ForecastLookup(
             return
         }
         var retained = previous.takeIf { it.data?.station?.id == hit.station.id } ?: Reading()
+        val dayStart =
+            java.time.Instant.ofEpochMilli(clock())
+                .atZone(java.time.ZoneId.of(place.zone))
+                .toLocalDate()
+                .atStartOfDay(java.time.ZoneId.of(place.zone))
+                .toInstant()
+                .toEpochMilli()
+        fun withHistory(forecast: Forecast, fetch: Boolean): Forecast {
+            var result = retained.data?.let { forecast.withEarlierHours(it) } ?: forecast
+            if ((result.earlier + result.hours).any { it.time <= dayStart }) return result
+            val earlier = runCatching { source.earlier(hit.station, dayStart, fetch) }.getOrNull()
+            if (earlier != null) result = result.withEarlierHours(earlier)
+            return result
+        }
         val cached = runCatching {
             source.cached(hit.station)
         }
@@ -58,7 +74,7 @@ class ForecastLookup(
         ) {
             retained =
                 Reading(
-                    cached.forecast,
+                    withHistory(cached.forecast, false),
                     if (online) Freshness.CACHED else Freshness.STALE,
                     cached.received,
                     "Saved forecast · checking DWD",
@@ -76,14 +92,18 @@ class ForecastLookup(
             require(result.station.id == hit.station.id) { "Wrong forecast point" }
             val now = clock()
             val state = issueFreshness(result.issue, now, FORECAST_MAX_AGE)
-            emit(
+            val reading =
                 Reading(
-                    result,
+                    withHistory(result, false),
                     state,
                     now,
                     if (state == Freshness.STALE) "DWD issue is old" else null,
+                    refreshing = true,
                 )
-            )
+            emit(reading)
+            if (!isCurrent()) return
+            val enriched = withHistory(reading.data!!, true)
+            emit(reading.copy(data = enriched, refreshing = false))
         } catch (error: Exception) {
             emit(retained.failed("Refresh failed · connection or data error"))
         }

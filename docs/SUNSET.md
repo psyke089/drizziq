@@ -5,6 +5,13 @@ Supersedes `tmp/sunset-feature-spec.md`. This is a proposed feature, not part
 of the 1.2.0 release. Preparing this specification does not enable new services
 or authorize operating infrastructure.
 
+Current implementation note: the follow-up Today UI now has local sunrise and
+sunset times using a standard horizon. This covers the basic event-time portion;
+date selection, sunset bearing, horizon/cloud visibility and spot finding below
+remain proposed. The runtime parser explicitly whitelists MOSMIX fields; adding
+further cloud layers requires a tested parser change, not just reading arbitrary
+keys from `Hour.values`.
+
 ## 1. Intended result
 
 Answer two related questions:
@@ -50,7 +57,7 @@ checks. Existing app accounts are not approval for a new data account.
 | B0 — Data proof | Developer-only prototype for a bounded Munich-area pilot: one licensed elevation source, candidate extract, horizon calculations and measured pack size/error. No production spot recommendations yet. | Reproducible generator, source/licence/access audit, fixture validation, published coverage and measured device budgets. |
 | B — Regional horizon/spot finder | Horizon evidence at supported positions and a ranked list of eligible nearby candidates, with a map preview and explanations. Unknown outside validated pilot coverage. | B0 passed; pack distribution chosen; geometry/uncertainty/access contracts below implemented. |
 | C — Spatial cloud context | DWD grid fields along the sunset direction, displayed as model evidence; any ranking contribution requires validation. | A working DWD decoding/data-delivery proof plus an explicit operations/distribution decision. |
-| Later | Routing/travel times, detailed buildings/canopy, notifications, satellite nowcasting, sunrise and wider regions. | Separate specs and any required source/account approvals. |
+| Later | Routing/travel times, detailed buildings/canopy, notifications, satellite nowcasting and wider regions. | Separate specs and any required source/account approvals. |
 
 Do not silently replace B/C with a single-station “sunset quality” score.
 Do not imply that a Germany-wide 25 m horizon database or daily tile service
@@ -130,8 +137,8 @@ constant azimuth speed; both depend on latitude, date and time.
 
 ### A/B: existing MOSMIX context
 
-`Hour.values` already preserves arbitrary supplied MOSMIX fields. The committed
-Munich fixture contains `N`, `Nl`, `Nm` and `Nh`; verify their units, meanings
+`Hour.values` contains only explicitly retained MOSMIX fields. The committed
+Munich source fixture contains `N`, `Nl`, `Nm` and `Nh`, but only `N` is currently retained by the parser; extend the whitelist and verify units, meanings
 and validity semantics against DWD's parameter description before exposing
 them. Presence in one fixture does not guarantee availability for all products.
 
