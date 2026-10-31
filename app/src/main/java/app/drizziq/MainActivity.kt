@@ -26,6 +26,8 @@ class MainActivity : Activity() {
     private lateinit var repo: Repository
     private lateinit var store: PlaceStore
     private lateinit var zones: ZoneLookup
+    private lateinit var placeChoices: PlaceChoices
+    private lateinit var placeCredit: TextView
     private lateinit var root: LinearLayout
     private lateinit var content: FrameLayout
     private lateinit var placeTitle: TextView
@@ -104,6 +106,19 @@ class MainActivity : Activity() {
         store = PlaceStore(this)
         zones = ZoneLookup(this)
         repo = Repository(this) { if (ready) render() }
+        placeChoices =
+            PlaceChoices(
+                this,
+                zones,
+                { repo.online },
+                { place ->
+                    if (choose(place)) {
+                        showPage(Page.FORECAST)
+                        true
+                    } else false
+                },
+                { place -> locationEntry(place, true) },
+            )
         createLayout()
         ready = true
         repo.connection()
@@ -167,6 +182,8 @@ class MainActivity : Activity() {
         placeColumn.addView(placeTitle)
         placeColumn.space(6)
         placeColumn.addView(coordinates)
+        placeCredit = placeCreditView().apply { visibility = View.GONE }
+        placeColumn.addView(placeCredit)
         location.addView(placeColumn, LinearLayout.LayoutParams(0, -2, 1f))
         root.addView(location)
         root.space(16)
@@ -256,7 +273,7 @@ class MainActivity : Activity() {
             empty.space(12)
             empty.addView(
                 label(
-                    "Direct from Deutscher Wetterdienst.\nYour selected coordinates stay on this device.",
+                    "Direct from Deutscher Wetterdienst.\nNearest forecast point resolved on this device.",
                     14f,
                     Hud.muted,
                 )
@@ -711,6 +728,8 @@ class MainActivity : Activity() {
         repo.age()
         placeTitle.text = repo.place.label
         coordinates.text = coords(repo.place.lat, repo.place.lon)
+        placeCredit.visibility = if (repo.place.geocodeId == null) View.GONE else View.VISIBLE
+        if (repo.place.geocodeId != null) placeCredit.text = placeCreditText(repo.place)
         connection.text = if (repo.online) "DWD / ONLINE" else "OFFLINE"
         connection.setTextColor(if (repo.online) Hud.cyan else Hud.amber)
         if (forecastVersion != repo.forecast || lastForecastPlace != repo.place) {
@@ -728,12 +747,25 @@ class MainActivity : Activity() {
         repo.refreshRadar()
     }
 
-    private fun choose(place: Place, persist: Boolean = true) {
-        if (persist) store.select(place)
+    private fun choose(place: Place, persist: Boolean = true): Boolean {
+        if (persist)
+            try {
+                store.select(place)
+            } catch (error: Exception) {
+                Toast.makeText(
+                        this,
+                        "Location could not be saved. Please retry.",
+                        Toast.LENGTH_LONG,
+                    )
+                    .show()
+                return false
+            }
+        placeChoices.invalidate()
         map.place = place
         setPlaying(false)
         lastRefresh = System.currentTimeMillis()
         repo.select(place)
+        return true
     }
 
     private fun locations() {
@@ -741,11 +773,24 @@ class MainActivity : Activity() {
         body.addView(label("SELECTED COORDINATES", 10f, Hud.muted, true))
         body.space(8)
         body.addView(label(repo.place.label, 22f))
+        if (repo.place.geocodeId != null) body.addView(placeCreditView(repo.place))
         body.space(5)
         body.addView(label(coords(repo.place.lat, repo.place.lon), 12f, Hud.muted, true))
         body.space(16)
         placesScroll.removeAllViews()
         placesScroll.addView(body)
+        body.addView(action("SEARCH CITY") { placeChoices.searchCity() })
+        body.space(8)
+        body.addView(action("USE CURRENT LOCATION") { placeChoices.currentLocation() })
+        body.space(6)
+        body.addView(
+            label(
+                "One position, resolved on this device. Location permission is optional for city search and coordinates.",
+                11f,
+                Hud.muted,
+            )
+        )
+        body.space(8)
         body.addView(action("ENTER COORDINATES") { locationEntry() })
         body.space(8)
         body.addView(action("SAVE CURRENT AS FAVOURITE") { saveFavourite() })
@@ -762,14 +807,14 @@ class MainActivity : Activity() {
                     background = panel()
                 }
             card.addView(label(place.label, 17f))
+            if (place.geocodeId != null) card.addView(placeCreditView(place))
             card.space(4)
             card.addView(label(coords(place.lat, place.lon), 10f, Hud.muted, true))
             card.space(8)
             val actions = row()
             actions.addView(
                 action("SELECT", "Select favourite ${place.label}") {
-                    choose(place)
-                    showPage(Page.FORECAST)
+                    if (choose(place)) showPage(Page.FORECAST)
                 },
                 LinearLayout.LayoutParams(0, dp(48), 1f),
             )
@@ -785,7 +830,14 @@ class MainActivity : Activity() {
             body.space(10)
         }
         body.space(12)
-        body.addView(action("DATA & LICENCES") { notices() })
+        body.addView(action("CLEAR SEARCH CACHE") { placeChoices.clearCache() })
+        body.space(8)
+        body.addView(
+            action("DATA & LICENCES") {
+                placeChoices.invalidate()
+                notices()
+            }
+        )
     }
 
     private fun notices() {
@@ -833,15 +885,26 @@ class MainActivity : Activity() {
         return input
     }
 
-    private fun locationEntry() {
+    private fun locationEntry(seed: Place? = null, requireZone: Boolean = false) {
+        val token = placeChoices.invalidate()
         val body = column().apply { pad(20) }
-        val name = field(body, "LABEL (OPTIONAL)", "")
-        val lat = field(body, "LATITUDE · −90 TO 90", repo.place.lat.toString(), true)
-        val lon = field(body, "LONGITUDE · −180 TO 180", repo.place.lon.toString(), true)
-        val zone = field(body, "TIME ZONE (OPTIONAL IANA ID)", "")
+        val name = field(body, "LABEL (OPTIONAL)", seed?.label ?: "")
+        val lat =
+            field(body, "LATITUDE · −90 TO 90", (seed?.lat ?: repo.place.lat).toString(), true)
+        val lon =
+            field(body, "LONGITUDE · −180 TO 180", (seed?.lon ?: repo.place.lon).toString(), true)
+        val zone =
+            field(
+                body,
+                if (requireZone) "TIME ZONE (REQUIRED IANA ID)" else "TIME ZONE (OPTIONAL IANA ID)",
+                seed?.zone ?: "",
+            )
         body.addView(
             label(
-                "Time zone is estimated offline when blank. Override near a time-zone border, e.g. Europe/Berlin. No GPS permission is used.",
+                if (requireZone)
+                    "Time zone could not be resolved. Enter a recognized IANA zone, e.g. Europe/Berlin."
+                else
+                    "Time zone is estimated offline when blank. Override near a time-zone border, e.g. Europe/Berlin. Manual entry needs no location permission.",
                 12f,
                 Hud.muted,
             )
@@ -850,11 +913,12 @@ class MainActivity : Activity() {
             AlertDialog.Builder(this)
                 .setTitle("Enter location")
                 .setView(ScrollView(this).apply { addView(body) })
-                .setNegativeButton("Cancel", null)
+                .setNegativeButton("Cancel") { _, _ -> placeChoices.cancel(token) }
                 .setPositiveButton("Use location", null)
                 .create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                if (!placeChoices.isCurrent(token)) return@setOnClickListener
                 val a = lat.text.toString().trim().replace(',', '.').toDoubleOrNull()
                 val b = lon.text.toString().trim().replace(',', '.').toDoubleOrNull()
                 if (a == null || !a.isFinite() || a !in -90.0..90.0) {
@@ -865,55 +929,87 @@ class MainActivity : Activity() {
                     lon.error = "Longitude must be between −180 and 180"
                     return@setOnClickListener
                 }
-                val tz = zone.text.toString().trim().ifBlank { zones.at(a, b) }
+                val tz =
+                    zone.text.toString().trim().ifBlank {
+                        runCatching { zones.at(a, b) }.getOrNull() ?: ""
+                    }
                 if (tz !in TimeZone.getAvailableIDs()) {
                     zone.error = "Use a valid IANA zone, such as Europe/Berlin"
                     return@setOnClickListener
                 }
-                choose(
-                    Place(
-                        name.text.toString().trim().take(60).ifBlank {
-                            "${number(a,3)}, ${number(b,3)}"
-                        },
-                        a,
-                        b,
-                        tz,
-                    )
-                )
+                val label =
+                    compactPlaceLabel(name.text.toString().trim()).ifBlank {
+                        "${number(a,3)}, ${number(b,3)}"
+                    }
+                val place =
+                    seed?.withCoordinates(a, b, tz)?.relabel(label) ?: Place(label, a, b, tz)
+                if (!choose(place)) return@setOnClickListener
                 dialog.dismiss()
                 showPage(Page.FORECAST)
             }
         }
+        placeChoices.track(dialog, token)
         dialog.show()
     }
 
     private fun saveFavourite() {
+        val token = placeChoices.invalidate()
         val body = column().apply { pad(20) }
         val name = field(body, "FAVOURITE LABEL", repo.place.label)
         val dialog =
             AlertDialog.Builder(this)
                 .setTitle("Save favourite")
                 .setView(body)
-                .setNegativeButton("Cancel", null)
+                .setNegativeButton("Cancel") { _, _ -> placeChoices.cancel(token) }
                 .setPositiveButton("Save", null)
                 .create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val label = name.text.toString().trim().take(60)
+                val label = compactPlaceLabel(name.text.toString().trim())
                 if (label.isEmpty()) {
                     name.error = "Enter a label"
                     return@setOnClickListener
                 }
-                val place = repo.place.copy(label = label)
-                store.save(place)
-                store.select(place)
-                choose(place, false)
+                if (!placeChoices.isCurrent(token)) return@setOnClickListener
+                val place = repo.place.relabel(label)
+                try {
+                    store.save(place)
+                } catch (error: Exception) {
+                    Toast.makeText(
+                            this,
+                            "Favourite could not be saved. Please retry.",
+                            Toast.LENGTH_LONG,
+                        )
+                        .show()
+                    return@setOnClickListener
+                }
+                if (!choose(place)) return@setOnClickListener
                 dialog.dismiss()
                 locations()
                 Toast.makeText(this, "Favourite saved", Toast.LENGTH_SHORT).show()
             }
         }
+        placeChoices.track(dialog, token)
         dialog.show()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        placeChoices.foreground(true)
+    }
+
+    override fun onStop() {
+        placeChoices.foreground(false)
+        super.onStop()
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        placeChoices.onPermissionResult(requestCode)
     }
 
     override fun onResume() {
@@ -941,6 +1037,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         dead = true
         ready = false
+        placeChoices.close()
         handler.removeCallbacksAndMessages(null)
         runCatching {
             (getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager)

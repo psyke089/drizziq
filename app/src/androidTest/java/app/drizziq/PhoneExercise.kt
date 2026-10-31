@@ -168,15 +168,15 @@ class PhoneExercise : Instrumentation() {
             bounds.centerX() + 100f,
             bounds.centerY() + 80f,
         )
-        check(radarMapNode().contentDescription.toString() != original) {
-            "One-finger pan did not move the map"
+        waitFor("one-finger pan moves the map", 3000) {
+            radarMapNode().contentDescription.toString() != original
         }
         val beforeZoom = zoom()
         pinch(bounds.centerX().toFloat(), bounds.centerY().toFloat())
-        check(zoom() > beforeZoom) { "Spreading fingers did not zoom in: $beforeZoom to ${zoom()}" }
+        waitFor("spreading fingers zooms in", 3000) { zoom() > beforeZoom }
         val zoomed = zoom()
         pinch(bounds.centerX().toFloat(), bounds.centerY().toFloat(), reverse = true)
-        check(zoom() < zoomed) { "Pinching fingers did not zoom out" }
+        waitFor("pinching fingers zooms out", 3000) { zoom() < zoomed }
         val beforeDoubleTap = zoom()
         repeat(2) {
             val time = SystemClock.uptimeMillis()
@@ -278,6 +278,285 @@ class PhoneExercise : Instrumentation() {
                     result.putString(
                         "checks",
                         "Places selection and content survive Activity recreation; Forecast remains reachable",
+                    )
+                }
+                "geocoding-probe" -> {
+                    try {
+                        val reply = GeocodeHttp().fetch(Geocoding.url("München"))
+                        result.putInt("http_status", reply.status)
+                        result.putInt("response_bytes", reply.body.size)
+                        val json = org.json.JSONObject(reply.body.toString(Charsets.UTF_8))
+                        val first = json.optJSONArray("results")?.optJSONObject(0)
+                        if (first != null)
+                            result.putString(
+                                "field_types",
+                                listOf("id", "latitude", "longitude", "name", "timezone")
+                                    .joinToString { "$it:${first.opt(it)?.javaClass?.simpleName}" },
+                            )
+                        result.putInt(
+                            "candidate_count",
+                            Geocoding.parse(reply.body.toString(Charsets.UTF_8)).size,
+                        )
+                    } catch (error: Exception) {
+                        error(
+                            "Geocoding diagnostic: " +
+                                generateSequence<Throwable>(error) { it.cause }
+                                    .joinToString(" -> ") { it.javaClass.simpleName }
+                        )
+                    }
+                }
+                "places-integration" -> {
+                    val prefs = targetContext.getSharedPreferences("places", 0)
+                    val camera = targetContext.getSharedPreferences("radar-viewport", 0)
+                    val oldSelected = prefs.getString("selected", null)
+                    val oldFavourites = prefs.getString("favourites", null)
+                    val oldCamera = camera.getString("camera", null)
+                    val coarse =
+                        targetContext.checkSelfPermission(
+                            android.Manifest.permission.ACCESS_COARSE_LOCATION
+                        )
+                    val fine =
+                        targetContext.checkSelfPermission(
+                            android.Manifest.permission.ACCESS_FINE_LOCATION
+                        )
+                    var owner = activity
+                    try {
+                        click("Places")
+                        click("SEARCH CITY")
+                        enter("CITY NAME", "München")
+                        click("Search")
+                        waitFor("candidate list", 45000) {
+                            nodes().any {
+                                it.contentDescription
+                                    ?.toString()
+                                    ?.startsWith("Select city result ") == true
+                            }
+                        }
+                        val candidate =
+                            nodes()
+                                .first {
+                                    it.contentDescription
+                                        ?.toString()
+                                        ?.startsWith("Select city result ") == true
+                                }
+                                .contentDescription
+                                .toString()
+                        val detail =
+                            Regex(
+                                    "Select city result ([0-9]+); .*; latitude ([-0-9.Ee+]+); longitude ([-0-9.Ee+]+)"
+                                )
+                                .matchEntire(candidate)!!
+                        click(candidate)
+                        waitFor("explicit result selection") {
+                            PlaceStore(targetContext).selected().geocodeId ==
+                                "open-meteo:${detail.groupValues[1]}"
+                        }
+                        val selected = PlaceStore(targetContext).selected()
+                        check(
+                            selected.lat == detail.groupValues[2].toDouble() &&
+                                selected.lon == detail.groupValues[3].toDouble()
+                        ) {
+                            "Search result coordinates were changed"
+                        }
+                        check(selected.zone in java.util.TimeZone.getAvailableIDs())
+                        waitFor("nearest forecast distance", 90000) { has("km away") }
+                        check(has("Open-Meteo") && has("GeoNames"))
+                        click("Places")
+                        click("SAVE CURRENT AS FAVOURITE")
+                        enter("FAVOURITE LABEL", "Geocoding integration snapshot")
+                        click("Save")
+                        val saved = PlaceStore(targetContext).selected()
+                        check(saved.geocodeId == selected.geocodeId && saved.geocodeLabelEdited)
+                        val monitor = addMonitor(MainActivity::class.java.name, null, false)
+                        try {
+                            runOnMainSync { owner.recreate() }
+                            owner =
+                                waitForMonitorWithTimeout(monitor, 10000)
+                                    ?: error("Recreation failed")
+                            waitForIdleSync()
+                        } finally {
+                            removeMonitor(monitor)
+                        }
+                        check(PlaceStore(targetContext).selected() == saved)
+                        check(PlaceStore(targetContext).favourites().any { it == saved })
+                        click("Places")
+                        click("ENTER COORDINATES")
+                        enter("LABEL (OPTIONAL)", "Coverage test")
+                        enter("LATITUDE · −90 TO 90", "0")
+                        enter("LONGITUDE · −180 TO 180", "0")
+                        enter("TIME ZONE (OPTIONAL IANA ID)", "UTC")
+                        click("Use location")
+                        waitFor("coverage explanation") {
+                            has("No DWD forecast point within 50 km")
+                        }
+                        check(!has("Temperature ")) {
+                            "Previous place weather leaked outside coverage"
+                        }
+                        click("Radar")
+                        check(has("Precipitation map"))
+                        check(
+                            targetContext.checkSelfPermission(
+                                android.Manifest.permission.ACCESS_COARSE_LOCATION
+                            ) == coarse
+                        )
+                        check(
+                            targetContext.checkSelfPermission(
+                                android.Manifest.permission.ACCESS_FINE_LOCATION
+                            ) == fine
+                        )
+                        result.putString(
+                            "checks",
+                            "explicit candidate coordinates/zone; nearest forecast distance; linked attribution; edited-provenance favourite and selection survive recreation; out-of-coverage forecast clears previous weather while radar remains available; original selected data restored",
+                        )
+                    } finally {
+                        runOnMainSync { owner.finish() }
+                        waitForIdleSync()
+                        check(
+                            prefs
+                                .edit()
+                                .putString("selected", oldSelected)
+                                .putString("favourites", oldFavourites)
+                                .commit()
+                        ) {
+                            "Could not restore original places"
+                        }
+                        check(camera.edit().putString("camera", oldCamera).commit()) {
+                            "Could not restore original map"
+                        }
+                        startActivitySync(
+                            Intent(targetContext, MainActivity::class.java)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }
+                }
+                "station-benchmark" -> {
+                    check(
+                        targetContext.applicationInfo.flags and
+                            android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE == 0
+                    ) {
+                        "Benchmark requires a release build"
+                    }
+                    val start = SystemClock.elapsedRealtimeNanos()
+                    val bytes = targetContext.assets.open("stations.tsv").use { it.readBytes() }
+                    val index = StationIndex.fromTsv(bytes.toString(Charsets.UTF_8))
+                    val loadMs = (SystemClock.elapsedRealtimeNanos() - start) / 1_000_000.0
+                    repeat(20) { index.nearestInCoverage(Place.MUNICH) }
+                    val samples =
+                        (1..200)
+                            .map {
+                                val before = SystemClock.elapsedRealtimeNanos()
+                                check(index.nearestInCoverage(Place.MUNICH)!!.station.id == "10865")
+                                (SystemClock.elapsedRealtimeNanos() - before) / 1_000_000.0
+                            }
+                            .sorted()
+                    result.putString("device", android.os.Build.MODEL)
+                    result.putInt("api", android.os.Build.VERSION.SDK_INT)
+                    result.putDouble("catalogue_load_ms", loadMs)
+                    result.putDouble("lookup_median_ms", samples[samples.size / 2])
+                    result.putDouble("lookup_p95_ms", samples[189])
+                    result.putDouble("lookup_max_ms", samples.last())
+                    result.putString(
+                        "catalogue_sha256",
+                        java.security.MessageDigest.getInstance("SHA-256")
+                            .digest(bytes)
+                            .joinToString("") { "%02x".format(it) },
+                    )
+                    result.putString(
+                        "checks",
+                        "release build; 20 warmups; 200 measured MOSMIX lookups",
+                    )
+                }
+                "places-search" -> {
+                    val original = PlaceStore(targetContext).selected()
+                    val favourites = PlaceStore(targetContext).favourites()
+                    val coarse =
+                        targetContext.checkSelfPermission(
+                            android.Manifest.permission.ACCESS_COARSE_LOCATION
+                        )
+                    val fine =
+                        targetContext.checkSelfPermission(
+                            android.Manifest.permission.ACCESS_FINE_LOCATION
+                        )
+                    val platform = PlatformLocationSource(targetContext)
+                    val eligible = platform.enabledProviders()
+                    check(eligible.all { it in listOf("gps", "network") })
+                    if (fine != android.content.pm.PackageManager.PERMISSION_GRANTED)
+                        check("gps" !in eligible)
+                    if (
+                        coarse != android.content.pm.PackageManager.PERMISSION_GRANTED &&
+                            fine != android.content.pm.PackageManager.PERMISSION_GRANTED
+                    ) {
+                        check(eligible.isEmpty())
+                        check(
+                            runCatching { platform.lastKnown("network") }.exceptionOrNull()
+                                is SecurityException
+                        )
+                        check(
+                            runCatching { platform.listen("gps", {}, {}) }.exceptionOrNull()
+                                is SecurityException
+                        )
+                    }
+                    click("Places")
+                    click("SEARCH CITY")
+                    check(has("Open-Meteo") && has("query")) {
+                        "Search disclosure/attribution missing"
+                    }
+                    enter("CITY NAME", "M")
+                    click("Search")
+                    waitFor("query validation", 3000) { has("2–120") }
+                    enter("CITY NAME", "München")
+                    click("Search")
+                    waitFor("city candidates", 45000) {
+                        nodes().any {
+                            it.contentDescription?.toString()?.startsWith("Select city result ") ==
+                                true
+                        }
+                    }
+                    check(PlaceStore(targetContext).selected() == original) {
+                        "Search selected a candidate without a tap"
+                    }
+                    enter("CITY NAME", "Berlin")
+                    waitFor("editing invalidates results", 3000) {
+                        nodes().none {
+                            it.contentDescription?.toString()?.startsWith("Select city result ") ==
+                                true
+                        }
+                    }
+                    click("Cancel")
+                    click("CLEAR SEARCH CACHE")
+                    check(
+                        PlaceStore(targetContext).favourites() == favourites &&
+                            PlaceStore(targetContext).selected() == original
+                    )
+                    if (
+                        coarse != android.content.pm.PackageManager.PERMISSION_GRANTED &&
+                            fine != android.content.pm.PackageManager.PERMISSION_GRANTED
+                    ) {
+                        click("USE CURRENT LOCATION")
+                        if (has("Current location")) {
+                            check(has("on this device")) { "Location rationale missing" }
+                            click("Cancel")
+                        } else {
+                            check(
+                                has("Location access") && (has("City search") || has("city search"))
+                            )
+                            click("Close")
+                        }
+                    }
+                    check(
+                        targetContext.checkSelfPermission(
+                            android.Manifest.permission.ACCESS_COARSE_LOCATION
+                        ) == coarse
+                    )
+                    check(
+                        targetContext.checkSelfPermission(
+                            android.Manifest.permission.ACCESS_FINE_LOCATION
+                        ) == fine
+                    )
+                    check(PlaceStore(targetContext).selected() == original)
+                    result.putString(
+                        "checks",
+                        "explicit city search; query validation; candidates require selection; editing/cancel/cache-clear preserve selection and favourites; optional location rationale cancellation preserves permissions",
                     )
                 }
                 "viewport-save" -> {

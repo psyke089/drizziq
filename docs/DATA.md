@@ -16,6 +16,18 @@ The forecast freshness threshold is nine hours from issue; radar is twenty minut
 
 The test resources are genuine DWD samples captured on 2026-10-22: Munich MOSMIX issue 15:00 UTC, observed radar 20:00 UTC, and radar forecast issued at 20:15 UTC and valid at 22:15 UTC. These are test fixtures only and are not packaged as app weather.
 
+## City search and optional location
+
+Explicit city searches use the [Open-Meteo geocoding API](https://open-meteo.com/en/docs/geocoding-api), with [GeoNames](https://www.geonames.org/) place metadata. Query parameters are fixed to `count=10`, `language=de`, `format=json`, with no country filter. Weather still comes exclusively from DWD. Terms checked 2026-10-31: the [free API terms](https://open-meteo.com/en/terms) allow non-commercial use without an account/key, subject to quotas (600/minute, 5,000/hour, 10,000/day). Commercial use requires a separate provider/licensing decision.
+
+Place metadata is attributed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), following [Open-Meteo's licence](https://open-meteo.com/en/licence). Linked Open-Meteo/GeoNames credits appear beside results and derived labels/favourites; edited labels retain provenance and are marked. The checked-in München response is an attributed geocoding test fixture, not runtime weather or a bundled search catalogue.
+
+Only an explicit Search/Refresh sends search text. Results use a 20-entry, 30-minute memory cache, cleared by process exit or Clear search cache. No search history is written to disk. HTTP redirects stay on the exact approved endpoint, decoded responses are limited to 256 KiB, and Retry-After is respected without automatic retries. Queries, full URLs and device coordinates are not logged.
+
+Use current location requests foreground coarse/fine access together after explicit consent, accepts approximate permission, and obtains one snapshot using eligible Android network/GPS providers. It never requests background access or follows movement. Provider services may use networks; offline acquisition is not guaranteed. Coordinates resolve to stations/time zones on-device, without a reverse-geocoding request. Only the selected snapshot/favourites are stored privately. Weather-station requests and map-tile requests continue to reveal their respective station/viewport to those services.
+
+The bundled MOSMIX catalogue revision is SHA-256 `713df55d858359b021932d84b8dd9c2832b7d73b592e301b2f410c1d7a5b7f3c`. It is validated and loaded once per Repository, then scanned linearly with exact-distance ties broken by station ID. Forecast coverage is 50 km inclusive; points outside it do not trigger a KMZ fetch. A catalogue update re-resolves saved coordinates. The metadata generator validates all fetched outputs before replacing assets; invalid source rows fail with line numbers.
+
 ## Basemap
 
 © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright). Data is available under the Open Database License 1.0. Raster tiles are obtained directly from `https://tile.openstreetmap.org/{z}/{x}/{y}.png` and used under the [tile usage policy](https://operations.osmfoundation.org/policies/tiles/).
@@ -42,5 +54,6 @@ Direct dependencies:
 | [jHDF 0.8.6](https://github.com/jamesmudd/jhdf/tree/v0.8.6) | Maintained Java 8-compatible HDF5 decoder | [MIT](licenses/jhdf-MIT.txt) |
 | Android desugar JDK libraries 2.1.5 | Java library compatibility on API 24 | GPLv2 with Classpath Exception; associated notices in the distribution |
 | JUnit 4.13.2 | JVM tests only | EPL 1.0 |
+| org.json 20250517 | JVM JSON tests only; Android uses platform JSON | Public domain |
 
-jHDF transitively uses SLF4J (MIT), Apache Commons Lang (Apache 2.0), compress-lzf (Apache 2.0), and lz4-java (Apache 2.0). They support the reader's metadata and compression handling. jHDF is pinned to its Java 8-compatible line to retain Android 7 support. No analytics, map SDK, web UI framework, GPS, or weather aggregator is used.
+jHDF transitively uses SLF4J (MIT), Apache Commons Lang (Apache 2.0), compress-lzf (Apache 2.0), and lz4-java (Apache 2.0). They support the reader's metadata and compression handling. jHDF is pinned to its Java 8-compatible line to retain Android 7 support. No analytics, map SDK, web UI framework or weather aggregator is used. Foreground location uses Android platform providers only.

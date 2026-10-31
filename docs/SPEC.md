@@ -30,7 +30,10 @@ The reference image `tmp/forecast.png` defines **which information** the forecas
 - Initial location is Munich: 48.138108 N, 11.574726 E.
 - The current location can be saved to a favourites list with a label.
 - Favourites persist across app restarts and can be selected and deleted.
-- No GPS or location permission is required.
+- Search city explicitly submits a name to Open-Meteo, shows up to ten disambiguated results and requires a result tap. Search is global; weather remains DWD-only.
+- Use current location obtains one foreground position with optional coarse/fine permission, using Android providers. It does not follow movement or reacquire on restart. City search, manual coordinates and favourites need no location permission.
+- Resolve the nearest bundled MOSMIX point locally, within 50 km inclusive. Outside coverage, keep the selected place and radar available, clear previous weather and explain the limit.
+- Preserve full coordinates, time zone and optional geocoding attribution in saved places. Unknown zones require explicit input. See [GEOCODING.md](GEOCODING.md) for the detailed behavior and acceptance contract.
 
 ### Data states
 

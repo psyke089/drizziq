@@ -15,12 +15,14 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object Http {
+    const val USER_AGENT = "Drizziq/1.2.0 (Android; https://codeberg.org/k4r/drizziq)"
     const val WEATHER = "https://opendata.dwd.de/weather/"
 
     private fun checked(url: URL) {
         require(
             url.protocol == "https" &&
-                (url.host == "tile.openstreetmap.org" ||
+                (Geocoding.allowed(url) ||
+                    url.host == "tile.openstreetmap.org" ||
                     (url.host == "opendata.dwd.de" && url.path.startsWith("/weather/")))
         ) {
             "Unapproved data endpoint"
@@ -38,7 +40,7 @@ object Http {
                     instanceFollowRedirects = false
                     setRequestProperty(
                         "User-Agent",
-                        "Drizziq/1.1.0 (Android; https://codeberg.org/k4r/drizziq)",
+                        USER_AGENT,
                     )
                     if (range != null) setRequestProperty("Range", "bytes=$range")
                 }
@@ -88,66 +90,16 @@ object Http {
     }
 }
 
-class PlaceStore(context: Context) {
-    private val prefs = context.getSharedPreferences("places", Context.MODE_PRIVATE)
-
-    private fun json(p: Place) =
-        JSONObject().put("label", p.label).put("lat", p.lat).put("lon", p.lon).put("zone", p.zone)
-
-    private fun place(j: JSONObject) =
-        Place(
-            j.getString("label"),
-            j.getDouble("lat"),
-            j.getDouble("lon"),
-            j.optString("zone", "Europe/Berlin"),
-        )
-
-    fun selected(): Place = runCatching {
-        place(JSONObject(prefs.getString("selected", null)!!))
-    }
-        .getOrDefault(Place.MUNICH)
-
-    fun select(p: Place) {
-        check(prefs.edit().putString("selected", json(p).toString()).commit()) {
-            "Location could not be saved"
-        }
-    }
-
-    fun favourites(): List<Place> = runCatching {
-        val a = JSONArray(prefs.getString("favourites", "[]"))
-        (0 until a.length()).map { place(a.getJSONObject(it)) }
-    }
-        .getOrDefault(emptyList())
-
-    fun save(p: Place) {
-        val all = favourites().filterNot { it.lat == p.lat && it.lon == p.lon } + p
-        write(all)
-    }
-
-    fun delete(p: Place) = write(favourites().filterNot { it == p })
-
-    private fun write(all: List<Place>) {
-        val a = JSONArray()
-        all.forEach { a.put(json(it)) }
-        check(prefs.edit().putString("favourites", a.toString()).commit()) {
-            "Favourites could not be saved"
-        }
-    }
-}
-
 class Repository(private val context: Context, private val changed: () -> Unit) {
     private val handler = Handler(Looper.getMainLooper())
     private val workers = Executors.newFixedThreadPool(2)
     private val closed = AtomicBoolean(false)
     private val directory = File(context.filesDir, "data").apply { mkdirs() }
-    private val stations by lazy {
-        context.assets.open("stations.tsv").bufferedReader().useLines { lines ->
-            lines
-                .map { line ->
-                    val p = line.split('\t')
-                    Station(p[0], p[1], p[2].toDouble(), p[3].toDouble(), p[4].toDoubleOrNull())
-                }
-                .toList()
+    private val stationIndex by lazy {
+        runCatching {
+            context.assets.open("stations.tsv").bufferedReader().use {
+                StationIndex.fromTsv(it.readText())
+            }
         }
     }
     private val generation = RequestGeneration()
@@ -189,81 +141,64 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
         return online
     }
 
+    private val forecastLookup by lazy {
+        ForecastLookup(
+            { stationIndex.getOrThrow() },
+            object : ForecastSource {
+                override fun cached(station: Station): CachedForecast? {
+                    val file = File(directory, "forecast-${station.id}.kmz")
+                    if (!file.exists()) return null
+                    return CachedForecast(
+                        file.inputStream().use { Mosmix.parseKmz(it) },
+                        file.lastModified(),
+                    )
+                }
+
+                override fun fetch(station: Station): Forecast {
+                    check(online) { "Offline" }
+                    val bytes =
+                        Http.bytes(
+                            "${Http.WEATHER}local_forecasts/mos/MOSMIX_L/single_stations/${station.id}/kml/MOSMIX_L_LATEST_${station.id}.kmz",
+                            3000000,
+                        )
+                    val result = Mosmix.parseKmz(bytes.inputStream())
+                    require(result.station.id == station.id) { "Wrong forecast point" }
+                    atomic(File(directory, "forecast-${station.id}.kmz"), bytes)
+                    return result
+                }
+            },
+            { System.currentTimeMillis() },
+        )
+    }
+
     fun select(p: Place) {
-        val retain = place == p && forecast.data != null
+        val previous = forecast
+        val retain = place == p && previous.data != null
         place = p
         val token = generation.next()
         forecast =
-            if (retain) forecast.copy(refreshing = true, message = "Checking DWD")
+            if (retain) previous.copy(refreshing = true, message = "Checking DWD")
             else Reading(message = "Locating nearest DWD station", refreshing = true)
         changed()
         workers.execute {
-            try {
-                val station = stations.minBy { it.distance(p) }
-                val cache = File(directory, "forecast-${station.id}.kmz")
-                if (cache.exists())
-                    runCatching { Mosmix.parseKmz(cache.inputStream()) }
-                        .getOrNull()
-                        ?.let { saved ->
-                            post {
-                                if (generation.isCurrent(token)) {
-                                    forecast =
-                                        Reading(
-                                            saved,
-                                            if (online) Freshness.CACHED else Freshness.STALE,
-                                            cache.lastModified(),
-                                            "Saved forecast · checking DWD",
-                                            true,
-                                        )
-                                    changed()
-                                }
-                            }
-                        }
-                loadForecast(station, cache, token)
-            } catch (e: Exception) {
-                failForecast(token, e)
+            forecastLookup.load(
+                p,
+                if (retain) previous else Reading(),
+                online,
+                { generation.isCurrent(token) && !closed.get() },
+            ) { reading ->
+                post {
+                    if (generation.isCurrent(token)) {
+                        forecast =
+                            if (!online && reading.data != null)
+                                reading.failed("Offline · last matching forecast retained")
+                            else reading
+                        changed()
+                    }
+                }
             }
         }
         if (radar.data == null && !radarBusy) loadRadarCache()
-    }
-
-    private fun failForecast(token: Int, e: Exception) = post {
-        if (generation.isCurrent(token)) {
-            forecast = forecast.failed("Refresh failed · ${e.message ?: "connection error"}")
-            changed()
-        }
-    }
-
-    private fun loadForecast(station: Station, cache: File, token: Int) {
-        check(online) { "Offline" }
-        val bytes =
-            Http.bytes(
-                "${Http.WEATHER}local_forecasts/mos/MOSMIX_L/single_stations/${station.id}/kml/MOSMIX_L_LATEST_${station.id}.kmz",
-                3000000,
-            )
-        val result = Mosmix.parseKmz(bytes.inputStream())
-        require(result.station.id == station.id) { "Wrong forecast station" }
-        atomic(cache, bytes)
-        post {
-            if (generation.isCurrent(token)) {
-                val state =
-                    issueFreshness(
-                        result.issue,
-                        System.currentTimeMillis(),
-                        FORECAST_MAX_AGE,
-                        online,
-                    )
-                forecast =
-                    Reading(
-                        result,
-                        state,
-                        System.currentTimeMillis(),
-                        if (state == Freshness.STALE) "DWD issue is old or connection is offline"
-                        else null,
-                    )
-                changed()
-            }
-        }
     }
 
     fun refreshForecast() {

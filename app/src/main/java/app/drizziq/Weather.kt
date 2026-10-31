@@ -14,10 +14,27 @@ data class Place(
     val lat: Double,
     val lon: Double,
     val zone: String = "Europe/Berlin",
+    val geocodeId: String? = null,
+    val geocodeLabelEdited: Boolean = false,
 ) {
     init {
         require(validCoordinates(lat, lon))
     }
+
+    fun relabel(value: String) =
+        copy(
+            label = value,
+            geocodeLabelEdited = geocodeId != null && (geocodeLabelEdited || value != label),
+        )
+
+    fun withCoordinates(latitude: Double, longitude: Double, timezone: String) =
+        copy(
+            lat = latitude,
+            lon = longitude,
+            zone = timezone,
+            geocodeId = geocodeId.takeIf { latitude == lat && longitude == lon },
+            geocodeLabelEdited = geocodeLabelEdited && latitude == lat && longitude == lon,
+        )
 
     companion object {
         val MUNICH = Place("Munich", 48.138108, 11.574726)

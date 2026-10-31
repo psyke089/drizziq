@@ -51,7 +51,7 @@ class PhoneRunnerTest(unittest.TestCase):
     def test_default_runs_only_smoke_without_connectivity_or_data_changes(self):
         calls, error = self.run_runner()
         self.assertIsNone(error)
-        self.assertEqual(["navigation", "lifecycle", "forecast", "radar", "viewport-save", "viewport-restore"], self.phases(calls))
+        self.assertEqual(["navigation", "lifecycle", "forecast", "radar", "places-search", "viewport-save", "viewport-restore"], self.phases(calls))
         self.assertTrue(all(parts[:3] == ["adb", "-s", "test-phone"] for parts in calls))
         self.assertFalse(any("settings" in parts or "svc" in parts or "connectivity" in parts for parts in calls))
         seed = next(i for i, parts in enumerate(calls) if "viewport-save" in parts)
@@ -63,7 +63,7 @@ class PhoneRunnerTest(unittest.TestCase):
     def test_full_runs_integration_and_restores_original_connectivity(self):
         calls, error = self.run_runner("--full")
         self.assertIsNone(error)
-        self.assertEqual(["navigation", "lifecycle", "forecast", "radar", "viewport-save", "viewport-restore", "main", "persistence", "offline", "restore"], self.phases(calls))
+        self.assertEqual(["navigation", "lifecycle", "forecast", "radar", "places-search", "viewport-save", "viewport-restore", "main", "persistence", "offline", "restore"], self.phases(calls))
         for suffix in (["connectivity", "airplane-mode", "disable"], ["svc", "wifi", "enable"], ["svc", "data", "enable"]):
             self.assertTrue(any(parts[-3:] == suffix for parts in calls))
 
@@ -91,6 +91,12 @@ class PhoneRunnerTest(unittest.TestCase):
         self.assertIn("Restoration failed", str(error))
         self.assertNotIn("restore", self.phases(calls))
         self.assertTrue(any(parts[-3:] == ["svc", "data", "enable"] for parts in calls))
+
+    def test_place_selection_integration_is_explicit_and_does_not_toggle_permissions_or_settings(self):
+        calls,error=self.run_runner("--places-integration")
+        self.assertIsNone(error)
+        self.assertIn("places-integration",self.phases(calls))
+        self.assertFalse(any("grant" in parts or "revoke" in parts or "settings" in parts or "svc" in parts for parts in calls))
 
     def test_failed_smoke_stops_before_later_phases(self):
         calls, error = self.run_runner(fail_phase="navigation")

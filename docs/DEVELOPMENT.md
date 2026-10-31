@@ -48,13 +48,16 @@ adb -s SERIAL install -r app/build/outputs/apk/androidTest/debug/app-debug-andro
 # Quick checks: tabs, Activity recreation, forecast scrolling, coordinate-dialog cancel, radar gestures, timeline scrubbing, playback, and map-camera persistence across force-stop/relaunch and Activity recreation.
 python3 tools/verify_phone.py --serial SERIAL
 
+# Optional Places integration: selects/saves test places, restores originals and camera.
+python3 tools/verify_phone.py --serial SERIAL --places-integration
+
 # Optional full integration: also changes test favourites and connectivity.
 python3 tools/verify_phone.py --serial SERIAL --full
 ```
 
 A signature mismatch means the build used a different key. Find/use the original key; never uninstall the app to get past the mismatch. On this workstation it is `tmp/android/debug.keystore`.
 
-Smoke checks do not change connectivity, favourites or the selected place. They pan/zoom the map and force-stop/relaunch the app to verify viewport persistence, so the saved camera position can change. They still load real forecast data, so they require a usable network/current forecast and are separate from the deterministic JVM gate. The full suite creates/deletes labelled test favourites, changes the selected place, temporarily enables airplane mode and disables Wi-Fi/mobile data, then attempts to restore every original connectivity setting even if a check or another restoration fails. Do not run it on a personal phone implicitly. Favourites/selected-place changes are not automatically rolled back.
+Smoke checks do not change connectivity, favourites or the selected place. They pan/zoom the map and force-stop/relaunch the app to verify viewport persistence, so the saved camera position can change. They also exercise city search validation, live results, cancellation/cache clearing and location rationale cancellation without requesting permissions. The Places integration option tests explicit candidate selection, provenance/favourite persistence and out-of-coverage behavior, restoring the exact original selected/favourite/camera preferences even on failure. Neither run changes location permissions or device settings. They still load real forecast data, so they require a usable network/current forecast and are separate from the deterministic JVM gate. The full suite creates/deletes labelled test favourites, changes the selected place, temporarily enables airplane mode and disables Wi-Fi/mobile data, then attempts to restore every original connectivity setting even if a check or another restoration fails. Do not run it on a personal phone implicitly. Favourites/selected-place changes are not automatically rolled back.
 
 Phone logs go to ignored `tmp/verification/` by default (`--reports PATH` overrides it). Full integration also captures the offline screen. The runner reopens Drizziq after successful completion because instrumentation may return to the launcher. Before manual taps, verify the foreground package and current bounds. Keep visual checks brief; do not repeatedly capture screens to assess small aesthetic details.
 

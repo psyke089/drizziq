@@ -7,8 +7,8 @@ android {
         applicationId = "app.drizziq"
         minSdk = 24
         targetSdk = 37
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.2.0"
         testInstrumentationRunner = "app.drizziq.PhoneExercise"
     }
     compileOptions {
@@ -28,4 +28,5 @@ dependencies {
     implementation("io.jhdf:jhdf:0.8.6")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20250517")
 }

@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--serial", default=os.environ.get("ANDROID_SERIAL"))
+    parser.add_argument("--places-integration",action="store_true",help="Opt in to selecting/searching/saving test places; original places and map camera are restored")
     parser.add_argument("--full", action="store_true", help="Opt in to favourites, persistence, offline and recovery checks")
     parser.add_argument("--reports", type=Path, default=ROOT / "tmp/verification")
     parser.add_argument("--adb", default=os.environ.get("ADB", "adb"))
@@ -77,9 +78,12 @@ def main():
     phase("lifecycle")
     phase("forecast")
     phase("radar")
+    phase("places-search")
     phase("viewport-save")
     command("shell", "am", "force-stop", "app.drizziq")
     phase("viewport-restore")
+    if args.places_integration:
+        phase("places-integration")
     if args.full:
         full_checks()
     # Instrumentation can leave the launcher in front. Return to the app explicitly.

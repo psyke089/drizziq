@@ -30,9 +30,16 @@ internal fun <T> Reading<T>.aged(
 
 /** Used on the main thread to reject callbacks for a previous place selection. */
 internal class RequestGeneration {
-    private var current = 0
+    @Volatile private var current = 0
 
-    fun next(): Int = ++current
+    @Synchronized fun next(): Int = ++current
 
     fun isCurrent(token: Int): Boolean = token == current
+
+    @Synchronized
+    fun runIfCurrent(token: Int, action: () -> Unit): Boolean {
+        if (token != current) return false
+        action()
+        return true
+    }
 }
