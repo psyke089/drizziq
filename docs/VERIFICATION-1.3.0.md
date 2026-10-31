@@ -37,3 +37,10 @@ no uninstall or data reset is used.
   versionCode 4, minimum API 24 and target API 37.
 
 Raw build and phone logs remain in ignored `tmp/release-1.3.0/`.
+
+## Screenshots
+
+The screenshot follow-up adds fresh Today, Week, Radar and Places captures from
+the installed 1.3.0 app to the release and updates the README to the same images.
+See [capture provenance](screenshots/1.3.0/README.md). It changes documentation and
+release images only; the existing release tag and verified APK are retained.

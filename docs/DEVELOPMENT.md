@@ -70,6 +70,19 @@ Smoke checks do not change connectivity, favourites or the selected place. They 
 
 Phone logs go to ignored `tmp/verification/` by default (`--reports PATH` overrides it). Full integration also captures the offline screen. The runner reopens Drizziq after successful completion because instrumentation may return to the launcher. Before manual taps, verify the foreground package and current bounds. Keep visual checks brief; do not repeatedly capture screens to assess small aesthetic details.
 
+## Release screenshots
+
+For every release with UI changes, capture fresh raw screenshots from the matching
+installed app version. Use a public city preset and restore original phone places,
+favourites and map-camera preferences after capture. Do not uninstall or reset data.
+
+Store captures under `docs/screenshots/VERSION/`, update README image paths and
+captions to that version, and attach all views to the Codeberg release. Embed the
+uploaded attachments in the release notes and verify the README paths and release
+image URLs resolve. Keep the release tag and APK unchanged for screenshot-only
+corrections. Screenshots are documentation changes and do not require repeating
+the app test suite.
+
 ## Growing the suite
 
 Add tests alongside behavior changes rather than setting arbitrary coverage targets. Prioritize boundaries and failure paths in repository/cache policies, request ordering, missing DWD fields and local-day calculations. Use device tests for Activity recreation, navigation state, persistence and actual gestures. Keep live-service integration separate from fast deterministic checks. CI can later invoke the same local gate without changing its definition.

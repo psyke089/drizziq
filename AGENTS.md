@@ -51,6 +51,7 @@ Android lint and ktfmt are the configured analysis/formatting tools. Detekt, ktl
 
 ## Phone and completion rules
 
+- For every UI release, capture fresh screenshots from that app version, attach them to the Codeberg release and embed them in its notes. Update the README images to the same version; never leave screenshots of an older UI in the README. Use a public city preset for captures and restore the phone's original places/camera afterward. Keep captures raw and visual review brief.
 - Use an explicit device serial when multiple devices are present. Preserve app data. Never uninstall to solve a signing mismatch; use the existing debug key.
 - On this workstation the phone's existing build uses `tmp/android/debug.keystore`. The verification wrapper prefers that directory when the key exists. Do not commit keys or passwords.
 - Quick checks must not modify connectivity or favourites. Full integration is an explicit opt-in; restore connectivity even on failure and attempt every restoration action.

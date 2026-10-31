@@ -10,8 +10,11 @@
 </p>
 
 <p align="center">
-  <img src="docs/drizziq-v1.0.0-screenshot.png" alt="Drizziq running on a OnePlus 5T, showing live DWD weather for Munich in its dark forecast view" width="300">
+  <img src="docs/screenshots/1.3.0/drizziq-v1.3.0-today.png" alt="Drizziq 1.3.0 Today view on a OnePlus 5T, with the hourly forecast and SVG weather icons" width="300">
+  <img src="docs/screenshots/1.3.0/drizziq-v1.3.0-radar.png" alt="Drizziq 1.3.0 Radar view on a OnePlus 5T, with full-width precipitation map and overlaid playback controls" width="300">
 </p>
+
+Screenshots from v1.3.0 on a OnePlus 5T / Android 13. [All four views are included in the release](https://codeberg.org/k4r/drizziq/releases/tag/v1.3.0).
 
 Drizziq is a native Kotlin Android app for one selected place, specified in [SPEC.md](docs/SPEC.md). It reads weather directly from Deutscher Wetterdienst open data and runs on Android 7.0+ (API 24). No accounts, ads, analytics or tracking. Location permission is optional and used only for an explicit current-location request.
 
