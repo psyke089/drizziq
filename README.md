@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://codeberg.org/k4r/drizziq"><img src="docs/badges/codeberg.svg" alt="Codeberg · private repository"></a>
-  <a href="app/build.gradle.kts"><img src="docs/badges/version.svg" alt="Version 1.2.0"></a>
+  <a href="app/build.gradle.kts"><img src="docs/badges/version.svg" alt="Version 1.3.0"></a>
   <img src="docs/badges/android.svg" alt="Android 7.0+ · API 24">
   <a href="LICENSE"><img src="docs/badges/license.svg" alt="Licence MIT"></a>
 </p>
@@ -44,7 +44,7 @@ Run the complete local development gate with:
 
 This checks Kotlin formatting, Python tooling tests, JVM unit tests, Android lint, and debug/release/device-test APK builds. No CI or phone is required. See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for test-first development, focused checks, debug signing, and quick versus full phone verification. [AGENTS.md](AGENTS.md) defines the workflow for agents.
 
-The default phone runner performs smoke checks. Use `--places-integration` for city selection and favourite persistence checks that restore the original places and map camera. Use `--full` explicitly for older integration checks that change test favourites and connectivity. Current UI results are in [VERIFICATION-LAYOUT.md](docs/VERIFICATION-LAYOUT.md). Released Places results and measured station timings are in [VERIFICATION-1.2.0.md](docs/VERIFICATION-1.2.0.md); historical results and screenshot provenance are in [VERIFICATION.md](docs/VERIFICATION.md).
+The default phone runner performs smoke checks. Use `--places-integration` for city selection and favourite persistence checks that restore the original places and map camera. Use `--full` explicitly for older integration checks that change test favourites and connectivity. Current release results are in [VERIFICATION-1.3.0.md](docs/VERIFICATION-1.3.0.md), with development history in [VERIFICATION-LAYOUT.md](docs/VERIFICATION-LAYOUT.md). Released Places results and measured station timings are in [VERIFICATION-1.2.0.md](docs/VERIFICATION-1.2.0.md); historical results and screenshot provenance are in [VERIFICATION.md](docs/VERIFICATION.md).
 
 ## Data
 

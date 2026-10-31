@@ -1,6 +1,7 @@
 # Verification — Today/Week and layout revision
 
-2026-10-31. This is the working UI revision after release 1.2.0; no new release or version bump is implied.
+2026-10-31. Development history of the UI revision after release 1.2.0, now shipped
+in 1.3.0. See [1.3.0 verification](VERIFICATION-1.3.0.md) for the completed release gate.
 
 ## Changes and automated gate
 

@@ -16,7 +16,7 @@ import org.json.JSONObject
 
 object Http {
     val downloads = DownloadTracker()
-    const val USER_AGENT = "Drizziq/1.2.0 (Android; https://codeberg.org/k4r/drizziq)"
+    const val USER_AGENT = "Drizziq/1.3.0 (Android; https://codeberg.org/k4r/drizziq)"
     const val WEATHER = "https://opendata.dwd.de/weather/"
 
     private fun checked(url: URL) {

@@ -5,8 +5,8 @@ Supersedes `tmp/sunset-feature-spec.md`. This is a proposed feature, not part
 of the 1.2.0 release. Preparing this specification does not enable new services
 or authorize operating infrastructure.
 
-Current implementation note: the follow-up Today UI now has local sunrise and
-sunset times using a standard horizon. This covers the basic event-time portion;
+Current implementation note: Drizziq 1.3.0 ships local sunrise and sunset times
+in Today using a standard horizon. This covers the basic event-time portion;
 date selection, sunset bearing, horizon/cloud visibility and spot finding below
 remain proposed. The runtime parser explicitly whitelists MOSMIX fields; adding
 further cloud layers requires a tested parser change, not just reading arbitrary
