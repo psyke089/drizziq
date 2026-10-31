@@ -50,7 +50,7 @@ The default phone runner performs smoke checks. Use `--places-integration` for c
 
 Weather comes exclusively from `https://opendata.dwd.de/weather/`. MOSMIX is a station forecast: the app chooses the nearest bundled point within 50 km and displays its distance; outside that radius it explains the coverage limit. DWD radar covers Germany and its surroundings; places outside that coverage receive an explicit coverage message. The keyless OpenStreetMap basemap has visible attribution and caches only tiles viewed on screen for at least seven days.
 
-City search sends only explicit search text to the free, non-commercial Open-Meteo geocoding service, with GeoNames attribution. Device positions resolve to forecast points locally, without reverse geocoding. All app icons and pictograms are drawn in this repository. [DATA.md](docs/DATA.md) records data sources, processing, licences and metadata regeneration.
+City search sends only explicit search text to the free, non-commercial Open-Meteo geocoding service, with GeoNames attribution. Device positions resolve to forecast points locally, without reverse geocoding. All app icon sources are editable SVGs in [artwork/icons](artwork/icons/README.md), compiled automatically to native Android vectors. [DATA.md](docs/DATA.md) records data sources, processing, licences and metadata regeneration.
 
 ## License
 

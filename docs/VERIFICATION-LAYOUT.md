@@ -50,3 +50,8 @@ The new `header-weather` device regression first failed against the checkpoint, 
 Checkpoint `629271c` commits the previous header. The follow-up adds a taller, more prominent weather header; narrower/bold full-civil-day columns; validated DWD R101/FX1 fields; identical shared details cards without DATA TRANSMISSION; and worker-calculated sunrise/sunset, including outside weather coverage. Missing past forecast hours remain unknown.
 
 Test-first evidence: nine of ten compiling-placeholder tests failed before implementation, plus the native layout regression. A fixture assertion then caught the parser dropping optional fields; retaining R101/FX1 made it green. Final gate: 72 JVM tests, 18 tooling tests, formatting, lint and all APK builds passed. All nine smoke/Places phases and focused day-forecast/refresh-stability phases passed. Original selected data/favourites were restored and permissions/settings were preserved. Brief native previews were inspected; the final app remains installed and open.
+
+
+## SVG icon migration
+
+The 63 editable SVG sources compile to native Android vectors. Focused checks passed: five converter tests, three weather/intensity mapping tests, debug/app-test builds and Android lint (no new issues; eight reviewed baseline findings remain). The `svg-icons` phase on the connected OnePlus 5T inflated and rendered all 63 icons successfully. One local SVG contact sheet was inspected briefly. Full verification remains deferred until release.

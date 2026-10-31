@@ -35,50 +35,6 @@
     </issue>
 
     <issue
-        id="DrawAllocation"
-        message="Avoid object allocations during draw/layout operations (preallocate and reuse instead)"
-        errorLine1="            val path=Path().apply { moveTo(50f,30f); cubicTo(45f,40f,36f,49f,36f,59f); cubicTo(36f,76f,64f,76f,64f,59f); cubicTo(64f,49f,55f,40f,50f,30f) };canvas.drawPath(path,p)"
-        errorLine2="                     ~~~~~~">
-        <location
-            file="src/main/java/app/drizziq/Hud.kt"
-            line="46"
-            column="22"/>
-    </issue>
-
-    <issue
-        id="DrawAllocation"
-        message="Avoid object allocations during draw/layout operations (preallocate and reuse instead)"
-        errorLine1="                val path=Path().apply { moveTo(25f,65f); cubicTo(10f,64f,10f,44f,27f,43f); cubicTo(29f,19f,65f,20f,69f,42f); cubicTo(90f,39f,96f,64f,77f,65f); close() }"
-        errorLine2="                         ~~~~~~">
-        <location
-            file="src/main/java/app/drizziq/Hud.kt"
-            line="56"
-            column="26"/>
-    </issue>
-
-    <issue
-        id="DrawAllocation"
-        message="Avoid object allocations during draw/layout operations (preallocate and reuse instead)"
-        errorLine1="        c.drawPath(Path().apply {moveTo(50f,76f);lineTo(39f,59f);lineTo(50f,64f);lineTo(61f,59f);close()},p)"
-        errorLine2="                   ~~~~~~">
-        <location
-            file="src/main/java/app/drizziq/Hud.kt"
-            line="88"
-            column="20"/>
-    </issue>
-
-    <issue
-        id="DrawAllocation"
-        message="Avoid object allocations during draw/layout operations (preallocate and reuse instead)"
-        errorLine1="                c.drawPath(Path().apply {moveTo(12f,22f);cubicTo(9f,18f,4f,13f,4f,9f);cubicTo(4f,-1f,20f,-1f,20f,9f);cubicTo(20f,13f,15f,18f,12f,22f);close()},p)"
-        errorLine2="                           ~~~~~~">
-        <location
-            file="src/main/java/app/drizziq/Hud.kt"
-            line="113"
-            column="28"/>
-    </issue>
-
-    <issue
         id="MonochromeLauncherIcon"
         message="The application adaptive icon is missing a monochrome tag"
         errorLine1="&lt;adaptive-icon xmlns:android=&quot;http://schemas.android.com/apk/res/android&quot;>"

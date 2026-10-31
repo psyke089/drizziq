@@ -36,6 +36,15 @@ Android lint fails on new warnings and errors. `app/lint-baseline.xml` records e
 
 Reports are generated under `app/build/reports/` (JVM tests and lint), with JUnit XML under `app/build/test-results/`. APKs are under `app/build/outputs/apk/`. These generated directories are ignored by Git. Release builds are unsigned and are not intended for installation over the debug app.
 
+## Icon artwork
+
+Edit SVGs in [`artwork/icons/`](../artwork/icons/README.md). Android `preBuild`
+automatically regenerates their VectorDrawable XML and `IconAssets.kt`; manual
+regeneration/checking uses `python3 tools/generate_icons.py [--check]`.
+The converter uses Python's standard library, and the app uses native vectors
+without a new runtime dependency. Its focused tests are
+`python3 -m unittest discover -s tools/tests -p test_generate_icons.py`.
+
 ## Connected phone
 
 Add your SDK's `platform-tools` directory to `PATH`, or pass `--adb /path/to/adb`. The phone must be unlocked. List devices using `adb devices`; pass `--serial` explicitly when more than one is connected. Both APKs must be signed with the same debug key and installed:

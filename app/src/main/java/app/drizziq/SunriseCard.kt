@@ -1,14 +1,10 @@
 package app.drizziq
 
-import android.annotation.SuppressLint
 import android.content.Context
-import android.graphics.*
 import android.graphics.Typeface
 import android.view.Gravity
-import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
-import kotlin.math.*
 
 /** Calculated sunrise/sunset, independent of DWD coverage and connection state. */
 class SunriseCard(context: Context) : LinearLayout(context) {
@@ -25,7 +21,7 @@ class SunriseCard(context: Context) : LinearLayout(context) {
         fun event(title: Int, rising: Boolean): TextView {
             val group = context.row()
             group.addView(
-                SolarEventGlyph(context, rising),
+                SvgIcon(context, if (rising) "sunrise" else "sunset"),
                 LayoutParams(context.dp(38), context.dp(48)),
             )
             val text = context.column()
@@ -78,48 +74,5 @@ class SunriseCard(context: Context) : LinearLayout(context) {
                 SolarState.POLAR_NIGHT -> context.getString(R.string.sun_polar_night)
                 else -> context.getString(R.string.sun_times_card)
             }
-    }
-}
-
-/** Generated locally: sun, horizon and rise/set arrow. All paths are prepared once. */
-@SuppressLint("ViewConstructor") // Private programmatic child; never inflated from XML.
-private class SolarEventGlyph(context: Context, private val rising: Boolean) : View(context) {
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val sun = RectF(18f, 28f, 64f, 74f)
-    private val arrow =
-        Path().apply {
-            if (rising) {
-                moveTo(76f, 42f)
-                lineTo(76f, 16f)
-                moveTo(66f, 26f)
-                lineTo(76f, 16f)
-                lineTo(86f, 26f)
-            } else {
-                moveTo(76f, 16f)
-                lineTo(76f, 42f)
-                moveTo(66f, 32f)
-                lineTo(76f, 42f)
-                lineTo(86f, 32f)
-            }
-        }
-
-    override fun onDraw(canvas: Canvas) {
-        val scale = min(width, height) / 100f
-        canvas.save()
-        canvas.translate((width - 100 * scale) / 2, (height - 100 * scale) / 2)
-        canvas.scale(scale, scale)
-        paint.color = Hud.amber
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 3.5f
-        paint.strokeCap = Paint.Cap.ROUND
-        paint.strokeJoin = Paint.Join.ROUND
-        canvas.drawArc(sun, 180f, 180f, false, paint)
-        canvas.drawLine(10f, 51f, 68f, 51f, paint)
-        canvas.drawLine(41f, 18f, 41f, 10f, paint)
-        canvas.drawLine(16f, 25f, 10f, 19f, paint)
-        canvas.drawLine(21f, 58f, 21f, 64f, paint)
-        paint.color = Hud.cyan
-        canvas.drawPath(arrow, paint)
-        canvas.restore()
     }
 }

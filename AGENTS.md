@@ -12,7 +12,7 @@
 
 - Visual language: dark, sci-fi and futuristic. Keep the interface consistent with the existing HUD palette and restrained typography/pictograms.
 - Use a single dark color scheme. Do not add a light mode or switch palettes based on the system theme.
-- Generate all visual assets for this project. Prefer locally authored vectors, Canvas drawing or procedural assets; use image generation when a raster asset is appropriate. Do not hunt for icons online or download icon packs/stock assets. Keep generated assets and their editable source in the repository where practical.
+- Generate visual assets locally or use assets explicitly supplied by the user. Icon artwork belongs in `artwork/icons/` as editable SVG, the source of truth for generated Android vectors. Builds run `tools/generate_icons.py`; edit SVGs rather than the generated XML or `IconAssets.kt`. Keep icon shapes out of Canvas code; runtime code may position, tint and rotate the compiled vectors. Dynamic charts/maps still use Canvas. See `artwork/icons/README.md` for supported SVG features and intensity conventions. Do not hunt for icons online or download icon packs/stock assets.
 - App data sources must be free and publicly available. Any source requiring an account or API key needs explicit user approval before integration, even if it has a free tier. Do not add an account/API-key requirement or obtain credentials implicitly.
 
 ## Test-first workflow (default for every behavior change)

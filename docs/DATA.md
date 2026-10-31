@@ -54,7 +54,9 @@ Run `python tools/update_metadata.py` to regenerate the station catalogue and pi
 
 ## Code and visual assets
 
-The application uses Android's native UI, HTTPS networking, bitmap renderer and touch APIs. `Hud.kt`, `HourlyForecast.kt`, `ic_launcher.xml`, the README badge SVGs and all weather/radar pictograms are created in this repository. Text uses Android system fonts. The committed screenshots are raw captures of the running app on the USB-connected OnePlus 5T.
+The application uses Android's native UI, HTTPS networking, bitmap renderer and touch APIs. Editable icon sources live in [`artwork/icons/`](../artwork/icons/README.md). The weather set was supplied by the user from their local `todo-0/assets/weather/` project and restyled to Drizziq's palette; mixed-precipitation and remaining UI icons were authored locally. `tools/generate_icons.py` compiles the SVGs to native Android vectors during builds, without a runtime SVG library. The existing launcher safe zone is preserved. Text uses Android system fonts. The README badge SVGs are authored in this repository. The committed screenshots are raw captures of the running app on the USB-connected OnePlus 5T.
+
+Condition mapping follows DWD's [MOSMIX weather-code workbook](https://www.dwd.de/DE/leistungen/opendata/help/schluessel_datenformate/kml/mosmix_element_weather_xls.xlsx?__blob=publicationFile&v=1), checked on 2026-10-31, including rime fog 49 and mixed precipitation 68/69/83/84. Explicit source intensities take precedence; the app's hourly-amount and wind-speed icon thresholds are documented with the SVGs. These visual thresholds do not change forecast values or constitute warning levels.
 
 Direct dependencies:
 

@@ -224,6 +224,19 @@ fun weatherLabel(code: Int?): String? =
         1 -> "Mostly clear"
         2 -> "Partly cloudy"
         3 -> "Overcast"
+        48,
+        49 -> "Rime fog"
+        56,
+        57 -> "Freezing drizzle"
+        66,
+        67 -> "Freezing rain"
+        68,
+        69 -> "Rain and snow"
+        77 -> "Snow grains"
+        83,
+        84 -> "Rain and snow showers"
+        96,
+        99 -> "Thunderstorm with hail"
         in 4..19 -> "Haze / visibility"
         in 20..29 -> "Recent precipitation"
         in 30..39 -> "Blowing snow / dust"

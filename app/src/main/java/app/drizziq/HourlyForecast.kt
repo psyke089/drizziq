@@ -110,12 +110,12 @@ class HourlyForecast(
         }
         title(ForecastMetric.SKY, 42)
         cells(42) { column, index ->
-            WeatherGlyph(context, column.hour?.condition).apply {
-                tag = "hour-icon:$index"
-                emphasized = true
-                contentDescription =
-                    weatherLabel(column.hour?.condition) ?: "No weather condition supplied"
-            }
+            WeatherGlyph(context, column.hour?.condition, precipitation = column.hour?.get("RR1c"))
+                .apply {
+                    tag = "hour-icon:$index"
+                    contentDescription =
+                        weatherLabel(column.hour?.condition) ?: "No weather condition supplied"
+                }
         }
         title(ForecastMetric.TEMPERATURE, 128, "°C")
         track.addView(
@@ -171,8 +171,22 @@ class HourlyForecast(
         }
         title(ForecastMetric.WIND, 40, "km/h")
         cells(40) { column, _ ->
-            value(number(column.hour?.wind, 0)).apply {
-                contentDescription = "Wind ${number(column.hour?.wind,0)} kilometres per hour"
+            val speed = column.hour?.wind
+            val icon = windIconName(speed)
+            context.row().apply {
+                gravity = Gravity.CENTER
+                if (icon != null)
+                    addView(
+                        SvgIcon(context, icon).apply {
+                            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+                        },
+                        LayoutParams(context.dp(18), context.dp(18)).apply {
+                            rightMargin = context.dp(3)
+                        },
+                    )
+                addView(value(if (icon == null) "—" else number(speed, 0)))
+                contentDescription =
+                    "Wind ${if (icon == null) "unavailable" else number(speed, 0) + " kilometres per hour"}"
             }
         }
         if (columns.any { it.hour?.gust != null }) {

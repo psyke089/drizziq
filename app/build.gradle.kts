@@ -30,3 +30,22 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250517")
 }
+
+val generateIcons by
+    tasks.registering(Exec::class) {
+        group = "build"
+        description = "Generate native vectors from the editable SVG icon sources"
+        val sources = rootProject.fileTree("artwork/icons") { include("**/*.svg") }
+        inputs.files(sources)
+        inputs.file(rootProject.file("tools/generate_icons.py"))
+        outputs.files(
+            sources.map {
+                file("src/main/res/drawable/ic_${it.nameWithoutExtension.replace('-', '_')}.xml")
+            }
+        )
+        outputs.file(file("src/main/java/app/drizziq/IconAssets.kt"))
+        outputs.file(file("src/main/res/mipmap-anydpi/ic_launcher.xml"))
+        commandLine("python3", rootProject.file("tools/generate_icons.py").absolutePath)
+    }
+
+tasks.named("preBuild") { dependsOn(generateIcons) }

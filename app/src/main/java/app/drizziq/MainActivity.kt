@@ -472,10 +472,19 @@ class MainActivity : Activity() {
             val row = row().apply { setPadding(0, dp(14), 0, dp(14)) }
             cell(row, Times.format(day.time, "EEE\ndd MMM", place.zone), 1.35f, Hud.cyan, 10f)
             row.addView(
-                WeatherGlyph(this, day.condition).apply {
-                    contentDescription =
-                        weatherLabel(day.condition) ?: "No weather condition supplied"
-                },
+                WeatherGlyph(
+                        this,
+                        day.condition,
+                        precipitation =
+                            day.hours
+                                .filter { it.condition == day.condition }
+                                .mapNotNull { it.get("RR1c") }
+                                .maxOrNull(),
+                    )
+                    .apply {
+                        contentDescription =
+                            weatherLabel(day.condition) ?: "No weather condition supplied"
+                    },
                 LinearLayout.LayoutParams(0, dp(36), .7f),
             )
             cell(row, day.high?.let { "${number(it,0)}°" } ?: "—", .8f)

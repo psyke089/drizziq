@@ -16,6 +16,14 @@ import kotlin.math.*
 /** A native, continuous Web Mercator viewport with an ODIM stereographic mesh. */
 class RadarMap(context: Context) : View(context) {
     private val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val crosshair =
+        requireNotNull(context.getDrawable(IconAssets.resource("location-crosshair")))
+            .mutate()
+            .apply {
+                alpha = 130
+                val radius = context.dp(12)
+                setBounds(-radius, -radius, radius, radius)
+            }
     private val tiles = LruCache<String, Bitmap>(64)
     private val waiting = mutableSetOf<String>()
     private val failed = mutableMapOf<String, Long>()
@@ -362,19 +370,11 @@ class RadarMap(context: Context) : View(context) {
             p.alpha = 255
         }
         val (px, py) = screen(place.lat, place.lon)
-        p.color = Hud.cyan
-        p.alpha = 130
-        p.style = Paint.Style.STROKE
-        p.strokeWidth = context.dp(1).toFloat()
-        val inner = context.dp(7).toFloat()
-        val outer = context.dp(11).toFloat()
-        c.drawCircle(px, py, context.dp(5).toFloat(), p)
-        c.drawLine(px - outer, py, px - inner, py, p)
-        c.drawLine(px + inner, py, px + outer, py, p)
-        c.drawLine(px, py - outer, px, py - inner, p)
-        c.drawLine(px, py + inner, px, py + outer, p)
+        c.save()
+        c.translate(px, py)
+        crosshair.draw(c)
+        c.restore()
         p.style = Paint.Style.FILL
-        c.drawCircle(px, py, context.dp(2).toFloat(), p)
         p.alpha = 255
         p.textSize = context.dp(11).toFloat()
         p.typeface = Typeface.MONOSPACE

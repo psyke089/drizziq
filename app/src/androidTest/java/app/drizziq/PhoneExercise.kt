@@ -228,6 +228,63 @@ class PhoneExercise : Instrumentation() {
                 )
             waitFor("initial app") { has("PLACES") }
             when (phase) {
+                "svg-icons" -> {
+                    val names =
+                        ((0..99).map { weatherIconName(it) } +
+                                ForecastMetric.entries.map { "metric-${it.name.lowercase()}" } +
+                                listOf(
+                                    "nav-today",
+                                    "nav-week",
+                                    "nav-radar",
+                                    "nav-places",
+                                    "sunrise",
+                                    "sunset",
+                                    "wind-compass",
+                                    "wind-arrow",
+                                    "location-crosshair",
+                                    "logo",
+                                    "play",
+                                    "pause",
+                                    "launcher-foreground",
+                                    "launcher-legacy",
+                                ) +
+                                listOf(0.0, 30.0, 40.0).mapNotNull { windIconName(it) })
+                            .toSet()
+                    runOnMainSync {
+                        val bitmap =
+                            android.graphics.Bitmap.createBitmap(
+                                96,
+                                96,
+                                android.graphics.Bitmap.Config.ARGB_8888,
+                            )
+                        val canvas = android.graphics.Canvas(bitmap)
+                        val pixels = IntArray(96 * 96)
+                        try {
+                            for (name in names) {
+                                bitmap.eraseColor(android.graphics.Color.TRANSPARENT)
+                                val icon = SvgIcon(targetContext, name)
+                                val spec =
+                                    android.view.View.MeasureSpec.makeMeasureSpec(
+                                        96,
+                                        android.view.View.MeasureSpec.EXACTLY,
+                                    )
+                                icon.measure(spec, spec)
+                                icon.layout(0, 0, 96, 96)
+                                icon.draw(canvas)
+                                bitmap.getPixels(pixels, 0, 96, 0, 0, 96, 96)
+                                check(pixels.any { android.graphics.Color.alpha(it) > 0 }) {
+                                    "SVG vector renders empty: $name"
+                                }
+                            }
+                        } finally {
+                            bitmap.recycle()
+                        }
+                    }
+                    result.putString(
+                        "checks",
+                        "${names.size} SVG-backed native vectors inflate and render, including every MOSMIX condition, intensity and UI icon",
+                    )
+                }
                 "hourly-refresh" -> {
                     fun views(root: android.view.View): List<android.view.View> =
                         listOf(root) +

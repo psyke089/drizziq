@@ -25,9 +25,12 @@ class CurrentWeatherHeader(context: Context) : LinearLayout(context) {
     private val condition =
         WeatherGlyph(context).apply {
             tag = "header-condition"
-            emphasized = true
         }
     private val direction = FrameLayout(context)
+    private val windIntensity =
+        SvgIcon(context, "weather-windy-light").apply {
+            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
     private val wind =
         context.label("—", 16f, Hud.ink, true).apply {
             tag = "header-wind-speed"
@@ -56,6 +59,7 @@ class CurrentWeatherHeader(context: Context) : LinearLayout(context) {
                 gravity = Gravity.END or Gravity.CENTER_VERTICAL
             }
         bottom.addView(direction, LayoutParams(context.dp(44), context.dp(44)))
+        bottom.addView(windIntensity, LayoutParams(context.dp(24), context.dp(24)))
         bottom.addView(wind, LayoutParams(-2, -2).apply { leftMargin = context.dp(4) })
         addView(bottom, LayoutParams(-1, context.dp(44)))
     }
@@ -79,7 +83,7 @@ class CurrentWeatherHeader(context: Context) : LinearLayout(context) {
             if (temp == null) Hud.muted
             else if (state == Freshness.LIVE) Hud.ink else Hud.color(state)
         )
-        condition.code = hour?.condition
+        condition.bind(hour)
         condition.contentDescription =
             if (hour == null) context.getString(R.string.header_condition_unavailable)
             else
@@ -92,6 +96,9 @@ class CurrentWeatherHeader(context: Context) : LinearLayout(context) {
                 )
         condition.invalidate()
         val speed = hour?.wind?.takeIf { it.isFinite() }
+        val windIcon = windIconName(speed)
+        windIntensity.visibility = if (windIcon == null) INVISIBLE else VISIBLE
+        if (windIcon != null) windIntensity.iconName = windIcon
         if (speed == null) {
             wind.setText(R.string.header_missing_value)
             wind.contentDescription = context.getString(R.string.header_wind_unavailable)
