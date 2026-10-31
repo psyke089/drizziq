@@ -32,7 +32,7 @@ Use JUnit 4, fixed timestamps and checked-in DWD fixtures for JVM tests. Put And
 
 Kotlin/Gradle files use ktfmt's Kotlin style. `.editorconfig` supplies basic editor settings. Python 3.11+ tooling tests use only standard-library `unittest`; they fake ADB commands and never contact a device.
 
-Android lint fails on new warnings and errors. `app/lint-baseline.xml` records existing findings when introducing this gate; see [LINT_DEBT.md](LINT_DEBT.md) for their scope. Do not regenerate the baseline to accept new warnings. Fix findings as relevant code changes, and remove resolved baseline entries deliberately. The gate does not include detekt, ktlint, screenshot testing, managed emulators, or a release-signing check.
+Android lint treats warnings as errors and runs without a baseline. Fix findings rather than introducing a baseline or disabling checks globally. Narrow source suppressions document cases where a check does not apply, such as Kotlin-only view constructors and radar clicks dispatched through `GestureDetector`. The gate does not include detekt, ktlint, screenshot testing, managed emulators, or a release-signing check.
 
 Reports are generated under `app/build/reports/` (JVM tests and lint), with JUnit XML under `app/build/test-results/`. APKs are under `app/build/outputs/apk/`. These generated directories are ignored by Git. Release builds are unsigned and are not intended for installation over the debug app.
 
@@ -57,6 +57,10 @@ adb -s SERIAL install -r app/build/outputs/apk/androidTest/debug/app-debug-andro
 # Quick checks: square tabs, Today/Week separation, reserved download line, Activity recreation, hourly/daily scrolling, search-dialog cancel, radar gestures, timeline scrubbing, playback, and map-camera persistence across force-stop/relaunch and Activity recreation.
 python3 tools/verify_phone.py --serial SERIAL
 
+# Focused lint cleanup checks: radar click dispatch, checked-in ODIM fixtures,
+# and monochrome launcher rendering (Android 13+ for the monochrome check).
+adb -s SERIAL shell am instrument -w -e phase lint-resources app.drizziq.test/app.drizziq.PhoneExercise
+
 # Optional Places integration: selects/saves test places, restores originals and camera.
 python3 tools/verify_phone.py --serial SERIAL --places-integration
 
@@ -76,12 +80,12 @@ For every release with UI changes, capture fresh raw screenshots from the matchi
 installed app version. Use a public city preset and restore original phone places,
 favourites and map-camera preferences after capture. Do not uninstall or reset data.
 
-Store captures under `docs/screenshots/VERSION/`, update README image paths and
-captions to that version, and attach all views to the Codeberg release. Embed the
-uploaded attachments in the release notes and verify the README paths and release
-image URLs resolve. Keep the release tag and APK unchanged for screenshot-only
-corrections. Screenshots are documentation changes and do not require repeating
-the app test suite.
+Store the single raw README capture as `docs/screenshot.png`, update its README
+caption and attach the release captures directly to the Codeberg release. Embed
+the uploaded attachments in the release notes and verify the README image path
+and release image URLs resolve. Keep the release tag and APK unchanged for
+screenshot-only corrections. Screenshots are documentation changes and do not
+require repeating the app test suite.
 
 ## Growing the suite
 

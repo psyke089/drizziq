@@ -10,13 +10,12 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/1.3.0/drizziq-v1.3.0-today.png" alt="Drizziq 1.3.0 Today view on a OnePlus 5T, with the hourly forecast and SVG weather icons" width="300">
-  <img src="docs/screenshots/1.3.0/drizziq-v1.3.0-radar.png" alt="Drizziq 1.3.0 Radar view on a OnePlus 5T, with full-width precipitation map and overlaid playback controls" width="300">
+  <img src="docs/screenshot.png" alt="Drizziq Today view on a OnePlus 5T, with the hourly forecast and SVG weather icons" width="300">
 </p>
 
-Screenshots from v1.3.0 on a OnePlus 5T / Android 13. [All four views are included in the release](https://codeberg.org/k4r/drizziq/releases/tag/v1.3.0).
+Raw capture from the current debug build on a OnePlus 5T / Android 13.
 
-Drizziq is a native Kotlin Android app for one selected place, specified in [SPEC.md](docs/SPEC.md). It reads weather directly from Deutscher Wetterdienst open data and runs on Android 7.0+ (API 24). No accounts, ads, analytics or tracking. Location permission is optional and used only for an explicit current-location request.
+Drizziq is a native Kotlin Android app for one selected place. It reads weather directly from Deutscher Wetterdienst open data and runs on Android 7.0+ (API 24). No accounts, ads, analytics or tracking. Location permission is optional and used only for an explicit current-location request.
 
 ## What it does
 
@@ -37,7 +36,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell am start -n app.drizziq/.MainActivity
 ```
 
-The wrapper pins Gradle 9.6.0 with a distribution checksum. Android Gradle Plugin 9.4.1 supplies Kotlin support. The only application library is jHDF 0.8.6, which reads DWD's current ODIM HDF5 radar format; Android core-library desugaring supports API 24.
+The wrapper pins Gradle 9.8.2 with a distribution checksum. Android Gradle Plugin 9.4.1 supplies Kotlin support. The only application library is jHDF 0.13.0, which reads DWD's current ODIM HDF5 radar format; Android core-library desugaring supports API 24.
 
 Run the complete local development gate with:
 
@@ -47,7 +46,7 @@ Run the complete local development gate with:
 
 This checks Kotlin formatting, Python tooling tests, JVM unit tests, Android lint, and debug/release/device-test APK builds. No CI or phone is required. See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for test-first development, focused checks, debug signing, and quick versus full phone verification. [AGENTS.md](AGENTS.md) defines the workflow for agents.
 
-The default phone runner performs smoke checks. Use `--places-integration` for city selection and favourite persistence checks that restore the original places and map camera. Use `--full` explicitly for older integration checks that change test favourites and connectivity. Current release results are in [VERIFICATION-1.3.0.md](docs/VERIFICATION-1.3.0.md), with development history in [VERIFICATION-LAYOUT.md](docs/VERIFICATION-LAYOUT.md). Released Places results and measured station timings are in [VERIFICATION-1.2.0.md](docs/VERIFICATION-1.2.0.md); historical results and screenshot provenance are in [VERIFICATION.md](docs/VERIFICATION.md).
+The default phone runner performs smoke checks. Use `--places-integration` for city selection and favourite persistence checks that restore the original places and map camera. Use `--full` explicitly for older integration checks that change test favourites and connectivity.
 
 ## Data
 

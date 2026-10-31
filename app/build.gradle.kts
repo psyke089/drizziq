@@ -18,14 +18,14 @@ android {
     }
     buildTypes { release { isMinifyEnabled = false } }
     lint {
-        baseline = file("lint-baseline.xml")
         warningsAsErrors = true
     }
+    sourceSets.getByName("androidTest").assets.srcDir("src/test/resources")
 }
 
 dependencies {
     // DWD RV is ODIM HDF5; decoding this format warrants a maintained reader.
-    implementation("io.jhdf:jhdf:0.8.6")
+    implementation("io.jhdf:jhdf:0.13.0")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250517")

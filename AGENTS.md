@@ -43,7 +43,7 @@ Android lint and ktfmt are the configured analysis/formatting tools. Detekt, ktl
 
 - JVM tests use JUnit 4 in `app/src/test`; device checks use `PhoneExercise` in `app/src/androidTest`. Keep tests in the same package as the code under test. Python tooling tests use the standard library's `unittest` in `tools/tests`.
 - Prefer names like `functionName_condition_expectedResult` for new tests. Keep existing tests intact unless their behavior/contract actually changed.
-- Never delete, skip, weaken assertions, or update a lint baseline just to turn a failure green. If an existing test appears wrong, explain the discrepancy before changing its contract. Necessary selector changes for an authorized UI change must preserve the original assertions.
+- Never delete, skip, weaken assertions, or introduce a lint baseline just to turn a failure green. If an existing test appears wrong, explain the discrepancy before changing its contract. Necessary selector changes for an authorized UI change must preserve the original assertions.
 - Unit tests must use fixed timestamps, checked-in fixtures and fakes for clocks, networking and storage; no live requests or real sleeps. Device integration tests may poll with a deadline and use gesture pacing.
 - Assert observable behavior, including boundaries and failure paths; avoid tests that simply mirror the implementation. Cover stale/cache handling, failed refresh retention, obsolete requests, missing data, time zones and lifecycle state when changing those behaviors.
 - Android framework calls in JVM tests should fail rather than silently return defaults. Keep pure rules independent of Android.
@@ -56,4 +56,4 @@ Android lint and ktfmt are the configured analysis/formatting tools. Detekt, ktl
 - On this workstation the phone's existing build uses `tmp/android/debug.keystore`. The verification wrapper prefers that directory when the key exists. Do not commit keys or passwords.
 - Quick checks must not modify connectivity or favourites. Full integration is an explicit opt-in; restore connectivity even on failure and attempt every restoration action.
 - Verify the foreground package and current UI bounds before coordinate taps. Instrumentation can exit to the launcher after finishing. Prefer semantic accessibility selectors over coordinates.
-- Done means relevant test-first evidence, a green local gate, affected device checks where available, and no unintended changes. Existing lint warnings are tracked in a reviewed baseline; new warnings fail the gate. A missing SDK, dependency or phone is a reported verification limitation, never a passing check.
+- Done means relevant test-first evidence, a green local gate, affected device checks where available, and no unintended changes. Android lint runs without a baseline; warnings fail the gate. A missing SDK, dependency or phone is a reported verification limitation, never a passing check.

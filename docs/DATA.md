@@ -24,7 +24,7 @@ The test resources are genuine DWD samples captured on 2026-10-22: Munich MOSMIX
 
 Sun times are computed on-device with locally authored NOAA/Meeus-style solar-coordinate mathematics, finding geometric solar-centre crossings at −0.833° within the selected place’s civil day. This is a conventional unobstructed horizon, not a terrain/building/cloud visibility prediction. No astronomy API or device-coordinate request is used at runtime. Polar day/night and skipped civil dates have explicit no-event outcomes. Work is bounded to one worker/latest pending calculation and guarded against obsolete place/date callbacks.
 
-The equations are documented in [NOAA calculation details](https://gml.noaa.gov/grad/solcalc/calcdetails.html). Independent [USNO reference requests](https://aa.usno.navy.mil/data/api) for fixed public-city coordinates were captured on 2026-10-31 for tests (Munich autumn/summer, New York DST day and Sydney summer); tests make no live requests. Reference agreement is tested within two minutes, not claimed as a universal observation guarantee. Real observed times depend on refraction and the local skyline. See `SolarCalculatorTest.kt` for fixed dates/values and [SUNSET.md](SUNSET.md) for the separate planned visibility/spot-finder feature.
+The equations are documented in [NOAA calculation details](https://gml.noaa.gov/grad/solcalc/calcdetails.html). Independent [USNO reference requests](https://aa.usno.navy.mil/data/api) for fixed public-city coordinates were captured on 2026-10-31 for tests (Munich autumn/summer, New York DST day and Sydney summer); tests make no live requests. Reference agreement is tested within two minutes, not claimed as a universal observation guarantee. Real observed times depend on refraction and the local skyline. See `SolarCalculatorTest.kt` for fixed dates/values and [the future sunset plan](future/SUNSET.md) for the separate planned visibility/spot-finder feature.
 
 ## City search and optional location
 
@@ -63,9 +63,9 @@ Direct dependencies:
 | Component | Purpose | Licence |
 | --- | --- | --- |
 | Kotlin standard library | Kotlin runtime | Apache 2.0 |
-| [jHDF 0.8.6](https://github.com/jamesmudd/jhdf/tree/v0.8.6) | Maintained Java 8-compatible HDF5 decoder | [MIT](licenses/jhdf-MIT.txt) |
+| [jHDF 0.13.0](https://github.com/jamesmudd/jhdf/tree/v0.13.0) | HDF5 decoder for DWD radar | [MIT](licenses/jhdf-MIT.txt) |
 | Android desugar JDK libraries 2.1.5 | Java library compatibility on API 24 | GPLv2 with Classpath Exception; associated notices in the distribution |
 | JUnit 4.13.2 | JVM tests only | EPL 1.0 |
 | org.json 20250517 | JVM JSON tests only; Android uses platform JSON | Public domain |
 
-jHDF transitively uses SLF4J (MIT), Apache Commons Lang (Apache 2.0), compress-lzf (Apache 2.0), and lz4-java (Apache 2.0). They support the reader's metadata and compression handling. jHDF is pinned to its Java 8-compatible line to retain Android 7 support. No analytics, map SDK, web UI framework or weather aggregator is used. Foreground location uses Android platform providers only.
+jHDF transitively uses SLF4J (MIT), Apache Commons Lang (Apache 2.0), compress-lzf (Apache 2.0), and lz4-java (Apache 2.0). They support the reader's metadata and compression handling. Android builds use D8 and core-library desugaring for compatibility with the app's minimum API 24. No analytics, map SDK, web UI framework or weather aggregator is used. Foreground location uses Android platform providers only.

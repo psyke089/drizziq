@@ -228,6 +228,95 @@ class PhoneExercise : Instrumentation() {
                 )
             waitFor("initial app") { has("PLACES") }
             when (phase) {
+                "lint-resources" -> {
+                    runOnMainSync {
+                        // Keep this map uninitialised for a place, so gestures cannot save a
+                        // camera.
+                        val map = RadarMap(targetContext).apply { online = false }
+                        val parent = android.widget.FrameLayout(targetContext)
+                        parent.addView(map)
+                        map.layout(0, 0, 400, 400)
+                        var clicks = 0
+                        map.setOnClickListener { clicks++ }
+                        val start = SystemClock.uptimeMillis()
+                        fun send(down: Long, elapsed: Long, action: Int, x: Float) {
+                            val event = MotionEvent.obtain(down, down + elapsed, action, x, 200f, 0)
+                            try {
+                                check(map.dispatchTouchEvent(event))
+                            } finally {
+                                event.recycle()
+                            }
+                        }
+                        try {
+                            send(start, 0, MotionEvent.ACTION_DOWN, 200f)
+                            send(start, 50, MotionEvent.ACTION_UP, 200f)
+                            check(clicks == 1) { "Radar tap must reach performClick" }
+                            val dragStart = start + 1000
+                            send(dragStart, 0, MotionEvent.ACTION_DOWN, 200f)
+                            send(dragStart, 50, MotionEvent.ACTION_MOVE, 300f)
+                            send(dragStart, 100, MotionEvent.ACTION_UP, 300f)
+                            check(clicks == 1) { "Radar drag must not emit a click" }
+                            check(
+                                map.performAccessibilityAction(
+                                    AccessibilityNodeInfo.ACTION_CLICK,
+                                    null,
+                                )
+                            )
+                            check(clicks == 2) {
+                                "Radar accessibility click must reach performClick"
+                            }
+                        } finally {
+                            map.dispose()
+                            parent.removeView(map)
+                        }
+                    }
+                    for ((file, time) in
+                        listOf(
+                            "rv-observed-20261022.h5" to "2026-10-22T20:00:00Z",
+                            "rv-forecast-20261022.h5" to "2026-10-22T22:15:00Z",
+                        )) {
+                        val radar = Odim.decode(context.assets.open(file).use { it.readBytes() })
+                        check(radar.time == Times.parse(time)) { "Radar fixture validity: $file" }
+                        check(radar.grid.width == 1100 && radar.grid.height == 1200)
+                        check(radar.colors.any { it == 0 }) { "Dry radar pixels: $file" }
+                        check(radar.colors.any { it == RadarPalette.colors[1] }) {
+                            "Precipitation radar pixels: $file"
+                        }
+                    }
+                    if (android.os.Build.VERSION.SDK_INT >= 33) {
+                        runOnMainSync {
+                            val icon =
+                                targetContext.packageManager.getApplicationIcon(
+                                    targetContext.packageName
+                                ) as android.graphics.drawable.AdaptiveIconDrawable
+                            val mask = checkNotNull(icon.monochrome) { "Missing themed icon mask" }
+                            val bitmap =
+                                android.graphics.Bitmap.createBitmap(
+                                    108,
+                                    108,
+                                    android.graphics.Bitmap.Config.ARGB_8888,
+                                )
+                            try {
+                                mask.setBounds(0, 0, 108, 108)
+                                mask.draw(android.graphics.Canvas(bitmap))
+                                val pixels = IntArray(108 * 108)
+                                bitmap.getPixels(pixels, 0, 108, 0, 0, 108, 108)
+                                check(pixels.any { android.graphics.Color.alpha(it) > 0 }) {
+                                    "Themed icon mask is empty"
+                                }
+                                check(android.graphics.Color.alpha(bitmap.getPixel(0, 0)) == 0) {
+                                    "Themed icon mask must have a transparent background"
+                                }
+                            } finally {
+                                bitmap.recycle()
+                            }
+                        }
+                    }
+                    result.putString(
+                        "checks",
+                        "Radar tap/drag/accessibility click dispatch, observed/forecast fixture decoding and themed launcher mask rendering",
+                    )
+                }
                 "svg-icons" -> {
                     val names =
                         ((0..99).map { weatherIconName(it) } +

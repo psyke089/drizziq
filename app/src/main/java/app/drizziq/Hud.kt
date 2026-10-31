@@ -1,5 +1,6 @@
 package app.drizziq
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.*
 import android.graphics.drawable.GradientDrawable
@@ -82,6 +83,7 @@ fun Context.action(title: String, description: String = title, click: () -> Unit
     }
 
 /** Weather artwork comes from editable SVGs compiled to native Android vectors. */
+@SuppressLint("ViewConstructor") // Kotlin-only view; never inflated from XML or layout tools.
 class WeatherGlyph(
     context: Context,
     code: Int? = null,
@@ -115,6 +117,7 @@ fun windDirectionName(bearing: Double): String =
     )[((bearing / 22.5).roundToInt() % 16 + 16) % 16]
 
 /** The SVG compass stays fixed while its separate SVG arrow follows the bearing. */
+@SuppressLint("ViewConstructor") // Kotlin-only view requires an explicit wind bearing.
 class WindDirectionGlyph(context: Context, private val bearing: Double) : View(context) {
     private val compass =
         requireNotNull(context.getDrawable(IconAssets.resource("wind-compass"))).mutate()
@@ -141,6 +144,7 @@ class WindDirectionGlyph(context: Context, private val bearing: Double) : View(c
     }
 }
 
+@SuppressLint("ViewConstructor") // Kotlin-only view requires a navigation destination.
 class NavigationGlyph(context: Context, destination: String) :
     SvgIcon(context, "nav-${destination.lowercase()}") {
     var highlighted = false
