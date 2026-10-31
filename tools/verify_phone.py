@@ -75,6 +75,7 @@ def main():
             phase("restore")
 
     phase("navigation")
+    phase("layout")
     phase("lifecycle")
     phase("forecast")
     phase("radar")

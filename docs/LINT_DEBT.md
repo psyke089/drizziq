@@ -2,7 +2,7 @@
 
 The initial `app/lint-baseline.xml` records findings present when the local verification gate was introduced. The gate treats warnings as errors outside this baseline. This is an explicit inventory of existing work, not a rule to regenerate the baseline after a failed check.
 
-The initial inventory contained 19 findings across eight lint IDs. Removing redundant radar UI text resolved six `SetTextI18n` findings; those entries have been removed, leaving 13 findings across seven lint IDs. With `warningsAsErrors`, lint displays these existing warnings as errors during baseline creation.
+The initial inventory contained 19 findings across eight lint IDs. Removing redundant radar UI text resolved six `SetTextI18n` findings; those entries have been removed, leaving 13 findings across seven lint IDs. Replacing the obsolete `TemperatureTrace` removed its constructor finding, leaving 12 findings across those seven IDs. With `warningsAsErrors`, lint displays these existing warnings as errors during baseline creation.
 
 The findings cover:
 

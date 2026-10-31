@@ -123,17 +123,6 @@
     </issue>
 
     <issue
-        id="ViewConstructor"
-        message="Custom view `TemperatureTrace` is missing constructor used by tools: `(Context)` or `(Context,AttributeSet)` or `(Context,AttributeSet,int)`"
-        errorLine1="class TemperatureTrace(context:Context,private val hours:List&lt;Hour>):View(context) {"
-        errorLine2="      ~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/app/drizziq/Hud.kt"
-            line="121"
-            column="7"/>
-    </issue>
-
-    <issue
         id="ClickableViewAccessibility"
         message="`RadarMap#onTouchEvent` should call `RadarMap#performClick` when a click is detected"
         errorLine1="    override fun onTouchEvent(event:MotionEvent):Boolean {"

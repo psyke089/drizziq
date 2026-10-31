@@ -15,6 +15,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object Http {
+    val downloads = DownloadTracker()
     const val USER_AGENT = "Drizziq/1.2.0 (Android; https://codeberg.org/k4r/drizziq)"
     const val WEATHER = "https://opendata.dwd.de/weather/"
 
@@ -29,7 +30,12 @@ object Http {
         }
     }
 
-    fun bytes(address: String, limit: Int = 32000000, range: String? = null): ByteArray {
+    fun bytes(address: String, limit: Int = 32000000, range: String? = null): ByteArray =
+        downloads.track {
+            request(address, limit, range)
+        }
+
+    private fun request(address: String, limit: Int, range: String?): ByteArray {
         var url = URL(address)
         repeat(4) {
             checked(url)
@@ -107,6 +113,9 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
     var place = Place.MUNICH
         private set
 
+    var forecastPoint: StationHit? = null
+        private set
+
     var forecast = Reading<Forecast>()
         private set
 
@@ -174,6 +183,7 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
     fun select(p: Place) {
         val previous = forecast
         val retain = place == p && previous.data != null
+        if (place != p) forecastPoint = null
         place = p
         val token = generation.next()
         forecast =
@@ -186,6 +196,14 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
                 if (retain) previous else Reading(),
                 online,
                 { generation.isCurrent(token) && !closed.get() },
+                resolved = { hit ->
+                    post {
+                        if (generation.isCurrent(token)) {
+                            forecastPoint = hit
+                            changed()
+                        }
+                    }
+                },
             ) { reading ->
                 post {
                     if (generation.isCurrent(token)) {

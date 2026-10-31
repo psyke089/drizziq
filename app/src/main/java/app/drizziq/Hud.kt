@@ -249,7 +249,7 @@ class NavigationGlyph(context: Context, private val destination: String) : View(
         p.strokeCap = Paint.Cap.ROUND
         p.strokeJoin = Paint.Join.ROUND
         when (destination) {
-            "FORECAST" -> {
+            "TODAY" -> {
                 c.drawCircle(12f, 12f, 4f, p)
                 for (i in 0..7) {
                     c.save()
@@ -257,6 +257,13 @@ class NavigationGlyph(context: Context, private val destination: String) : View(
                     c.drawLine(12f, 2f, 12f, 5f, p)
                     c.restore()
                 }
+            }
+            "WEEK" -> {
+                c.drawRect(3f, 5f, 21f, 21f, p)
+                c.drawLine(3f, 10f, 21f, 10f, p)
+                c.drawLine(8f, 2f, 8f, 7f, p)
+                c.drawLine(16f, 2f, 16f, 7f, p)
+                for (y in listOf(14f, 18f)) for (x in listOf(7f, 12f, 17f)) c.drawPoint(x, y, p)
             }
             "RADAR" -> {
                 c.drawCircle(12f, 12f, 9f, p)
@@ -280,36 +287,5 @@ class NavigationGlyph(context: Context, private val destination: String) : View(
             }
         }
         c.restore()
-    }
-}
-
-class TemperatureTrace(context: Context, private val hours: List<Hour>) : View(context) {
-    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
-
-    override fun onDraw(c: Canvas) {
-        val valid = hours.mapNotNull { it.temperature }
-        if (valid.size < 2) return
-        val lo = valid.min()
-        val hi = valid.max()
-        val range = max(2.0, hi - lo)
-        p.color = Hud.line
-        p.strokeWidth = 1f
-        for (i in 1..3) c.drawLine(0f, height * i / 4f, width.toFloat(), height * i / 4f, p)
-        p.color = Hud.cyan
-        p.strokeWidth = context.dp(2).toFloat()
-        p.style = Paint.Style.STROKE
-        var last: Pair<Float, Float>? = null
-        hours.forEachIndexed { i, h ->
-            val t = h.temperature
-            if (t == null) last = null
-            else {
-                val point =
-                    (i * width.toFloat() / max(1, hours.size - 1)) to
-                        (height * .85 - (t - lo) / range * height * .65).toFloat()
-                last?.let { c.drawLine(it.first, it.second, point.first, point.second, p) }
-                c.drawCircle(point.first, point.second, context.dp(2).toFloat(), p)
-                last = point
-            }
-        }
     }
 }

@@ -4,6 +4,13 @@ Revised specification, 2026-10-30; implemented in 1.2.0 on 2026-10-31.
 It supersedes `tmp/spec-nearest-station-index.md`. See
 [1.2.0 verification](VERIFICATION-1.2.0.md) for measured results and device limits.
 
+Current UI revision: Today/Week replace the Forecast tab. Manual coordinate
+entry has been removed by the subsequent UI request; saved coordinates still
+load normally, and unresolved time zones now use a zone-only prompt. Device
+snapshots display the locally resolved station name instead of their internal
+`Current location` label. Those changes supersede the corresponding original
+interaction details below; the source, privacy, caching and coverage rules remain.
+
 ## 1. Scope and decisions
 
 Add **Search city** and **Use current location** to the Places view. Keep

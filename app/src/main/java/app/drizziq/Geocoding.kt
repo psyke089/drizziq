@@ -226,7 +226,7 @@ class CitySearch(
         if (cached != null && !refresh) return SearchResult.Results(cached, true)
         if (!online)
             return SearchResult.Failure(
-                "City search needs a connection. Use coordinates or favourites.",
+                "City search needs a connection. Use saved places or retry when online.",
                 cache.get(key) ?: emptyList(),
             )
         val wait = (retryAt - clock()).coerceAtLeast(0)

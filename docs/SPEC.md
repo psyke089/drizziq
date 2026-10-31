@@ -4,34 +4,34 @@ A native Android app for one selected place: a DWD weather forecast and a zoomab
 
 ## Required result
 
-### Forecast view
+### Today and Week
 
-For the selected location, show:
-
-- Current conditions: temperature, weather condition, wind, local time, place label, coordinates, elevation.
-- A 7-day outlook: weekday/date, high and low, condition, precipitation amount, wind, sunshine duration.
-- Hourly detail for at least the next 24 hours: temperature, precipitation, humidity, wind direction and speed.
-- Forecast issue/validity time and a clear freshness state.
-
-The reference image `tmp/forecast.png` defines **which information** the forecast view must carry. It is not a design or layout reference.
+- Four square bottom tabs: Today, Week, Radar and Places. Navigation stays fixed while content scrolls; selected tab survives Activity recreation.
+- Today contains the current-conditions card and the next 24 hours in one aligned horizontal grid, inspired by `tmp/meteoblue_hourly.png`: time/condition columns, temperature ribbon, rain bars, wind direction/speed and humidity only if supplied. Missing hours/fields remain unknown; the chart never bridges missing temperatures.
+- Places starts directly with its action buttons; the selected location appears only in the shared header.
+- Today omits the explanatory missing-value paragraph. Week omits its heading, calculation footnote and partial-day labels; missing/partial totals remain unavailable.
+- Week contains a compact daily table for the next seven available days: weekday/date, condition, high/low, precipitation, wind and sunshine. Partial-day totals remain unavailable.
+- Today retains forecast-point metadata; both forecast screens retain honest freshness and issue/validity/reception provenance. Device-location snapshots display their locally resolved forecast station name, independently of weather-fetch success; user-assigned/city labels are preserved.
+- Forecast refresh/cache/failure messages do not insert a banner above the content. Freshness remains in the existing footer; fatal failures are explained inside the empty-state card.
+- A thin indeterminate global download line covers weather, geocoding and viewed map tiles. Its two-dp slot remains reserved while idle; showing or hiding it cannot shift content or navigation. Overlapping requests keep it active until all transfers finish, including error/cancel cleanup.
 
 ### Radar view
 
 - A precipitation map that can be zoomed and panned freely.
 - Animated playback covering recent observations and the available forecast window.
-- The map occupies most of the available radar content area. Compact play/pause icons, timeline scrubbing with a current-time marker, and a slim precipitation legend remain below it. The play control is icon-only; no NOW label is drawn. Persist the map center and fractional zoom across app restarts and Activity recreation. Choosing different coordinates recenters the map. Current frame timestamps and observed/forecast metadata remain available to accessibility services rather than taking visual space.
+- The map fills the content area from edge to edge. Compact play/pause and timeline scrubbing controls overlay the map with a transparent background. There is no legend. The play control is icon-only; no NOW label is drawn. Persist the map center and fractional zoom across app restarts and Activity recreation. Choosing different coordinates recenters the map. Current frame timestamps and observed/forecast metadata remain available to accessibility services rather than taking visual space.
 - A subtle marker for the selected location, without an in-map place label. Drag to pan, pinch in/out and double-tap to zoom; zoom/recenter accessibility actions replace visible map-control buttons.
 - Compact notices for loading, cached, stale/offline or unavailable radar. Normal live status, issue/received metadata and frame date/time are not shown as separate lines. Keep map attribution visible.
 - A free/open, keyless basemap. Show attribution only where the map licence requires it.
 
 ### Location
 
-- The user can select any place by entering latitude and longitude, with range validation.
+- Select places with explicit city search, optional device location or saved favourites. There is no manual-coordinate entry screen; old coordinate-based saved places continue to work.
 - Initial location is Munich: 48.138108 N, 11.574726 E.
 - The current location can be saved to a favourites list with a label.
 - Favourites persist across app restarts and can be selected and deleted.
 - Search city explicitly submits a name to Open-Meteo, shows up to ten disambiguated results and requires a result tap. Search is global; weather remains DWD-only.
-- Use current location obtains one foreground position with optional coarse/fine permission, using Android providers. It does not follow movement or reacquire on restart. City search, manual coordinates and favourites need no location permission.
+- Use current location obtains one foreground position with optional coarse/fine permission, using Android providers. It does not follow movement or reacquire on restart. City search and favourites need no location permission.
 - Resolve the nearest bundled MOSMIX point locally, within 50 km inclusive. Outside coverage, keep the selected place and radar available, clear previous weather and explain the limit.
 - Preserve full coordinates, time zone and optional geocoding attribution in saved places. Unknown zones require explicit input. See [GEOCODING.md](GEOCODING.md) for the detailed behavior and acceptance contract.
 
@@ -61,7 +61,7 @@ Every reading must carry one of: loading, live, cached, stale, error. Never show
 ## Acceptance
 
 - Forecast and radar show live DWD-derived content for Munich on first launch.
-- A different latitude/longitude produces forecast and radar content for that place.
+- Selecting another city or saved snapshot resolves matching forecast and radar content for that place.
 - A saved favourite survives a full app restart and can be selected again.
 - Radar zooms, pans, scrubs, and loops without broken frames or stale timestamps.
 - Airplane mode produces clearly marked stale/error states, not fabricated readings.

@@ -12,7 +12,9 @@ class GeocodeHttp(
 ) : GeocodeTransport {
     private val connection = AtomicReference<HttpURLConnection?>()
 
-    override fun fetch(address: String): GeocodeReply {
+    override fun fetch(address: String): GeocodeReply = Http.downloads.track { request(address) }
+
+    private fun request(address: String): GeocodeReply {
         var url = URL(address)
         repeat(4) {
             require(Geocoding.allowed(url)) { "Unapproved geocoding endpoint" }

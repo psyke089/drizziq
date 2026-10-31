@@ -35,6 +35,29 @@ class GeocodeHttpTest {
     }
 
     @Test
+    fun fetch_tracksActualTransfersIncludingFailures_andFinishesTheProgressLease() {
+        val states = mutableListOf<Boolean>()
+        val observer = Http.downloads.observe { states += it }
+        try {
+            val http = GeocodeHttp { url ->
+                assertTrue(Http.downloads.active)
+                Connection(url)
+            }
+            http.fetch(Geocoding.url("Berlin"))
+            assertEquals(listOf(false, true, false), states)
+            val failed = GeocodeHttp { _ ->
+                assertTrue(Http.downloads.active)
+                throw java.io.IOException()
+            }
+            assertThrows(java.io.IOException::class.java) { failed.fetch(Geocoding.url("Berlin")) }
+            assertFalse(Http.downloads.active)
+            assertEquals(listOf(false, true, false, true, false), states)
+        } finally {
+            observer.cancel()
+        }
+    }
+
+    @Test
     fun fetch_configuresTimeoutsUserAgentAndNoImplicitRedirects_andClosesConnection() {
         lateinit var connection: Connection
         val http = GeocodeHttp { url -> Connection(url).also { connection = it } }

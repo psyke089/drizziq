@@ -19,6 +19,7 @@ class ForecastLookup(
         previous: Reading<Forecast> = Reading(),
         online: Boolean = true,
         isCurrent: () -> Boolean = { true },
+        resolved: (StationHit?) -> Unit = {},
         publish: (Reading<Forecast>) -> Unit,
     ) {
         fun emit(reading: Reading<Forecast>) {
@@ -29,6 +30,7 @@ class ForecastLookup(
             try {
                 catalogue()
             } catch (error: Exception) {
+                if (isCurrent()) resolved(null)
                 emit(
                     Reading(
                         state = Freshness.ERROR,
@@ -38,6 +40,8 @@ class ForecastLookup(
                 return
             }
         val hit = index.nearestInCoverage(place)
+        if (!isCurrent()) return
+        resolved(hit)
         if (hit == null) {
             emit(Reading(state = Freshness.ERROR, message = "No DWD forecast point within 50 km"))
             return

@@ -38,13 +38,13 @@ The map visibly links the attribution to the licence page, identifies the app in
 
 The files `timezones.tree` and `timezones.txt` are extracted without changing their lookup content from [PhotoStructure tz-lookup](https://github.com/photostructure/tz-lookup), revision `6051e7e2fe8b754e23d40aff0120cf9b38bde608`. Its code and the port in `ZoneLookup.kt` are under [CC0](licenses/tz-lookup-CC0.txt), originally by The Dark Sky Company, LLC, with subsequent PhotoStructure changes. Data retrieved 2026-10-22.
 
-The geographical source is [timezone-boundary-builder](https://github.com/evansiroky/timezone-boundary-builder), © OpenStreetMap contributors, under [ODbL 1.0](licenses/timezone-data-ODbL-1.0.txt). The extracted database remains available in source in this repository under ODbL. Zone lookup is approximate around borders; the location form offers an explicit IANA-zone override. Android's installed time-zone rules supply the current civil-time offset.
+The geographical source is [timezone-boundary-builder](https://github.com/evansiroky/timezone-boundary-builder), © OpenStreetMap contributors, under [ODbL 1.0](licenses/timezone-data-ODbL-1.0.txt). The extracted database remains available in source in this repository under ODbL. Zone lookup is approximate around borders; an unresolved zone opens a focused IANA-zone prompt. Android's installed time-zone rules supply the current civil-time offset.
 
 Run `python tools/update_metadata.py` to regenerate the station catalogue and pinned timezone data. This needs a network connection; the app uses the bundled metadata offline.
 
 ## Code and visual assets
 
-The application uses Android's native UI, HTTPS networking, bitmap renderer and touch APIs. `Hud.kt`, `ic_launcher.xml`, the README badge SVGs and all weather/radar pictograms are created in this repository. Text uses Android system fonts. The committed screenshots are raw captures of the running app on the USB-connected OnePlus 5T.
+The application uses Android's native UI, HTTPS networking, bitmap renderer and touch APIs. `Hud.kt`, `HourlyForecast.kt`, `ic_launcher.xml`, the README badge SVGs and all weather/radar pictograms are created in this repository. Text uses Android system fonts. The committed screenshots are raw captures of the running app on the USB-connected OnePlus 5T.
 
 Direct dependencies:
 

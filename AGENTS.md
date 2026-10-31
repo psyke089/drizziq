@@ -32,7 +32,7 @@ Documentation and formatting-only changes do not need artificial behavior tests.
 - Focused JVM test: `./tools/verify --gradle-only testDebugUnitTest --tests 'app.drizziq.ReadingPolicyTest'`
 - Formatting check / apply: `./tools/verify --gradle-only formatCheck` / `./tools/verify --gradle-only formatKotlin`
 - Android lint: `./tools/verify --gradle-only lintDebug`
-- Phone smoke checks: `python3 tools/verify_phone.py --serial SERIAL` (navigation, lifecycle, forecast, radar, city search/cancel and viewport restart checks; no favourites or connectivity changes).
+- Phone smoke checks: `python3 tools/verify_phone.py --serial SERIAL` (navigation/layout, lifecycle, Today/Week forecast, radar, city search/cancel and viewport restart checks; no favourites or connectivity changes).
 - Places integration: `python3 tools/verify_phone.py --serial SERIAL --places-integration` (selects/saves test places, restores original places and camera; leaves permissions/settings unchanged).
 - Full phone integration: `python3 tools/verify_phone.py --serial SERIAL --full` (also creates/deletes test favourites and temporarily changes airplane mode, Wi-Fi and mobile data; restores original settings).
 - Phone runner expects matching debug and test APKs installed. It does not install/uninstall applications. See `docs/DEVELOPMENT.md` for signing and installation.

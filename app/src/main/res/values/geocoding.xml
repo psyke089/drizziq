@@ -12,12 +12,12 @@
     <string name="city_search_retained">Cached results · %1$s</string>
     <string name="place_attribution">Place names: Open-Meteo · GeoNames%1$s</string>
     <string name="place_label_edited"> · label edited</string>
-    <string name="location_purpose">Use one position to resolve a forecast point on this device. Approximate access is enough to try; precise access also permits GPS. Search and manual coordinates work without location permission.</string>
+    <string name="location_purpose">Use one position to resolve a forecast point on this device. Approximate access is enough to try; precise access also permits GPS. City search and saved places work without location permission.</string>
     <string name="location_progress">Getting one location fix…</string>
-    <string name="location_timeout">No usable position arrived within 20 seconds. Try again, or use city search or coordinates.</string>
-    <string name="location_unavailable">Location is disabled or no eligible provider is available. Check location settings yourself, then retry, or use city search or coordinates.</string>
-    <string name="location_permission_changed">Location permission changed. Try again, or use city search or coordinates.</string>
-    <string name="location_denied">Location access was not granted. City search and manual coordinates still work.</string>
-    <string name="location_permanent_denial">Location access is denied. Enable it in app settings if wanted; city search and manual coordinates still work.</string>
+    <string name="location_timeout">No usable position arrived within 20 seconds. Try again, or use city search or saved places.</string>
+    <string name="location_unavailable">Location is disabled or no eligible provider is available. Check location settings yourself, then retry, or use city search or saved places.</string>
+    <string name="location_permission_changed">Location permission changed. Try again, or use city search or saved places.</string>
+    <string name="location_denied">Location access was not granted. City search and saved places still work.</string>
+    <string name="location_permanent_denial">Location access is denied. Enable it in app settings if wanted; city search and saved places still work.</string>
     <string name="location_success">Current location selected (reported accuracy ±%1$.0f m). Approximate position can affect which forecast point is nearest.</string>
 </resources>

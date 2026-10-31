@@ -9,6 +9,40 @@ class ForecastLookupTest {
     private fun forecast(id: String = point.id, issue: Long = 100L) =
         Forecast(point.copy(id = id), issue, listOf(Hour(issue + 3600000, mapOf("TTT" to 280.0))))
 
+    @Test
+    fun resolution_failedWeatherFetch_stillPublishesMatchingStationBeforeNetwork() {
+        var resolved: StationHit? = null
+        val source =
+            Source().apply {
+                failure = true
+                complete = { assertEquals("10865", resolved?.station?.id) }
+            }
+        ForecastLookup({ StationIndex(listOf(point)) }, source, { 1000 })
+            .load(
+                Place.MUNICH,
+                resolved = { resolved = it },
+                publish = {},
+            )
+        assertEquals("10865", resolved?.station?.id)
+        var current = true
+        resolved = null
+        ForecastLookup(
+                {
+                    current = false
+                    StationIndex(listOf(point))
+                },
+                source,
+                { 1000 },
+            )
+            .load(
+                Place.MUNICH,
+                isCurrent = { current },
+                resolved = { resolved = it },
+                publish = {},
+            )
+        assertNull(resolved)
+    }
+
     private class Source : ForecastSource {
         var saved: CachedForecast? = null
         var fetched: Forecast? = null

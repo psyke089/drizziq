@@ -31,9 +31,8 @@ class PhoneExercise : Instrumentation() {
             if (test()) return
             SystemClock.sleep(250)
         }
-        error(
-            "Timed out: $description. Screen: ${nodes().mapNotNull {it.text?.toString()}.joinToString(" | ")}"
-        )
+        // UI can contain a device-position snapshot; do not dump coordinates or queries to logs.
+        error("Timed out: $description")
     }
 
     private fun has(text: String) =
@@ -209,6 +208,239 @@ class PhoneExercise : Instrumentation() {
                 )
             waitFor("initial app") { has("PLACES") }
             when (phase) {
+                "forecast-status" -> {
+                    fun views(root: android.view.View): List<android.view.View> =
+                        listOf(root) +
+                            if (root is android.view.ViewGroup)
+                                (0 until root.childCount).flatMap { views(root.getChildAt(it)) }
+                            else emptyList()
+                    fun body(): android.view.ViewGroup {
+                        val scroll =
+                            views(activity.window.decorView)
+                                .filterIsInstance<android.widget.ScrollView>()
+                                .first { it.visibility == android.view.View.VISIBLE }
+                        return scroll.getChildAt(0) as android.view.ViewGroup
+                    }
+                    for (page in listOf("Today", "Week")) {
+                        click(page)
+                        waitFor("forecast ready to refresh") {
+                            var ready = false
+                            runOnMainSync {
+                                ready =
+                                    views(body()).filterIsInstance<android.widget.Button>().any {
+                                        it.text.toString() == "REFRESH DWD" && it.isEnabled
+                                    }
+                            }
+                            ready
+                        }
+                        val before = Rect()
+                        var bannerAbsent = false
+                        runOnMainSync {
+                            val old = body().getChildAt(0)
+                            old.getGlobalVisibleRect(before)
+                            views(body())
+                                .filterIsInstance<android.widget.Button>()
+                                .first { it.text.toString() == "REFRESH DWD" }
+                                .performClick()
+                            bannerAbsent = body().getChildAt(0) is android.view.ViewGroup
+                        }
+                        check(bannerAbsent) {
+                            "Status banner inserted above $page content during refresh"
+                        }
+                        waitFor("refreshed content laid out", 3000) {
+                            var measured = false
+                            runOnMainSync { measured = body().getChildAt(0).height > 0 }
+                            measured
+                        }
+                        val after = Rect()
+                        runOnMainSync { body().getChildAt(0).getGlobalVisibleRect(after) }
+                        check(before.top == after.top) {
+                            "$page content moved when refresh status changed"
+                        }
+                    }
+                    click("Today")
+                    result.putString(
+                        "checks",
+                        "Today/Week refresh inserts no status banner; content top stays fixed",
+                    )
+                }
+                "copy-cleanup" -> {
+                    fun views(root: android.view.View): List<android.view.View> =
+                        listOf(root) +
+                            if (root is android.view.ViewGroup)
+                                (0 until root.childCount).flatMap { views(root.getChildAt(it)) }
+                            else emptyList()
+                    fun texts(): List<String> {
+                        var result = listOf<String>()
+                        runOnMainSync {
+                            result =
+                                views(activity.window.decorView)
+                                    .filterIsInstance<android.widget.TextView>()
+                                    .map { it.text.toString() }
+                        }
+                        return result
+                    }
+                    click("Today")
+                    waitFor("today data") { has("Temperature ") }
+                    check(
+                        texts().none {
+                            it.contains("no DWD value") ||
+                                it.contains("Relative humidity is not supplied")
+                        }
+                    ) {
+                        "Today explanation remains"
+                    }
+                    click("Week")
+                    waitFor("weekly rows") { has("HIGH") && has("LOW") }
+                    check(
+                        texts().none {
+                            it.contains("WEEK AHEAD") ||
+                                it.contains("High / low from available") ||
+                                it.contains("Partial day")
+                        }
+                    ) {
+                        "Removed Week copy remains"
+                    }
+                    click("Places")
+                    var buttonsFirst = false
+                    runOnMainSync {
+                        val scroll =
+                            views(activity.window.decorView)
+                                .filterIsInstance<android.widget.ScrollView>()
+                                .first { it.visibility == android.view.View.VISIBLE }
+                        val body = scroll.getChildAt(0) as android.view.ViewGroup
+                        val first = body.getChildAt(0)
+                        buttonsFirst =
+                            first is android.widget.Button && first.text.toString() == "SEARCH CITY"
+                    }
+                    check(buttonsFirst) { "Places must start directly with the buttons" }
+                    check(texts().any { it == "FAVOURITES" })
+                    click("Today")
+                    result.putString(
+                        "checks",
+                        "Today explanatory note removed; Week heading/summary/partial labels removed while table remains; Places starts with Search city without duplicate location",
+                    )
+                }
+                "recenter-probe" -> {
+                    click("Radar")
+                    val place = PlaceStore(targetContext).selected()
+                    val action =
+                        radarMapNode().actionList.first {
+                            it.label?.toString() == "Recenter on selected location"
+                        }
+                    check(radarMapNode().performAction(action.id))
+                    waitForIdleSync()
+                    val center =
+                        Regex("Center ([-0-9.]+), ([-0-9.]+);")
+                            .find(radarMapNode().contentDescription.toString())!!
+                    val dy =
+                        kotlin.math.abs(
+                            center.groupValues[1].toDouble() -
+                                place.lat.coerceIn(-85.05112878, 85.05112878)
+                        )
+                    val dx =
+                        kotlin.math.abs(
+                            center.groupValues[2].toDouble() -
+                                (if (place.lon == 180.0) -180.0 else place.lon)
+                        )
+                    result.putDouble("latitude_difference_degrees", dy)
+                    result.putDouble("longitude_difference_degrees", minOf(dx, 360 - dx))
+                }
+                "layout" -> {
+                    click("Today")
+                    waitFor("today forecast") { has("Temperature ") }
+                    check(!has("7-DAY OUTLOOK"))
+                    val before = Rect()
+                    nodes()
+                        .first { it.contentDescription?.toString() == "Today" }
+                        .getBoundsInScreen(before)
+                    var line: android.widget.ProgressBar? = null
+                    runOnMainSync {
+                        line = activity.window.decorView.findViewWithTag("download-progress")
+                        check(line != null && line!!.height == targetContext.dp(2)) {
+                            "Download line needs reserved height"
+                        }
+                        for (name in listOf("TODAY", "WEEK", "RADAR", "PLACES")) {
+                            val tab =
+                                activity.window.decorView.findViewWithTag<android.view.View>(
+                                    "tab:$name"
+                                )
+                            val background =
+                                tab.background as? android.graphics.drawable.GradientDrawable
+                            check(background == null || background.cornerRadius == 0f) {
+                                "Tab corners must be square"
+                            }
+                        }
+                    }
+                    val transfer = Http.downloads.begin()
+                    try {
+                        waitFor("global download line", 3000) {
+                            var visible = false
+                            runOnMainSync {
+                                visible = line!!.visibility == android.view.View.VISIBLE
+                            }
+                            visible
+                        }
+                        val after = Rect()
+                        nodes()
+                            .first { it.contentDescription?.toString() == "Today" }
+                            .getBoundsInScreen(after)
+                        check(before == after) { "Download line shifted navigation" }
+                    } finally {
+                        transfer.cancel()
+                    }
+                    click("Week")
+                    waitFor("week forecast") { has("HIGH") && has("LOW") }
+                    check(!has("Temperature ")) { "Right-now card leaked into Week" }
+                    check(has("HIGH") && has("LOW"))
+                    click("Places")
+                    check(
+                        !has("SELECTED COORDINATES") &&
+                            !has("ENTER COORDINATES") &&
+                            !has("One position, resolved")
+                    )
+                    check(has("SEARCH CITY") && has("USE CURRENT LOCATION"))
+                    click("Radar")
+                    val mapBounds = Rect().apply { radarMapNode().getBoundsInScreen(this) }
+                    var screenWidth = 0
+                    runOnMainSync { screenWidth = activity.window.decorView.width }
+                    check(mapBounds.left == 0 && mapBounds.width() == screenWidth) {
+                        "Radar must be full width"
+                    }
+                    val play =
+                        Rect().apply {
+                            nodes()
+                                .first {
+                                    it.contentDescription?.toString() ==
+                                        "Play or pause radar animation"
+                                }
+                                .getBoundsInScreen(this)
+                        }
+                    val scrub =
+                        Rect().apply {
+                            nodes()
+                                .first { it.className == "android.widget.SeekBar" }
+                                .getBoundsInScreen(this)
+                        }
+                    check(mapBounds.contains(play) && mapBounds.contains(scrub)) {
+                        "Playback controls must overlay the map"
+                    }
+                    check(!has("Precipitation legend") && !has("mm/5min"))
+                    runOnMainSync {
+                        val controls =
+                            activity.window.decorView.findViewWithTag<android.view.View>(
+                                "radar-controls"
+                            )
+                        check(controls.background == null) {
+                            "Radar controls need a transparent background"
+                        }
+                    }
+                    click("Today")
+                    result.putString(
+                        "checks",
+                        "square Today/Week/Radar/Places tabs; isolated forecast screens; removed manual coordinates/copy; edge-to-edge map with transparent controls; no legend; download line preserves layout",
+                    )
+                }
                 "navigation" -> {
                     waitFor("current forecast") { has("Temperature ") }
                     check(
@@ -223,26 +455,30 @@ class PhoneExercise : Instrumentation() {
                         nodes().first {
                             it.isClickable && it.contentDescription?.toString() == name
                         }
-                    check(tab("Forecast").isSelected)
+                    check(tab("Today").isSelected)
                     val before = Rect()
-                    tab("Forecast").getBoundsInScreen(before)
+                    tab("Today").getBoundsInScreen(before)
                     nodes()
                         .first { it.className == "android.widget.ScrollView" }
                         .performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
                     SystemClock.sleep(300)
                     val after = Rect()
-                    tab("Forecast").getBoundsInScreen(after)
+                    tab("Today").getBoundsInScreen(after)
                     check(before == after) { "Tab bar moved with forecast content" }
                     click("Places")
-                    check(tab("Places").isSelected && has("FAVOURITES") && has("ENTER COORDINATES"))
-                    click("ENTER COORDINATES")
-                    check(has("Enter location"))
+                    check(
+                        tab("Places").isSelected && has("FAVOURITES") && !has("ENTER COORDINATES")
+                    )
+                    click("SEARCH CITY")
+                    check(has("Search city"))
                     click("Cancel")
                     check(tab("Places").isSelected && has("FAVOURITES"))
+                    click("Week")
+                    check(tab("Week").isSelected && has("HIGH") && has("LOW"))
                     click("Radar")
                     check(tab("Radar").isSelected && has("Play or pause radar animation"))
-                    click("Forecast")
-                    check(tab("Forecast").isSelected)
+                    click("Today")
+                    check(tab("Today").isSelected)
                     repeat(20) {
                         nodes()
                             .first { it.className == "android.widget.ScrollView" }
@@ -252,7 +488,7 @@ class PhoneExercise : Instrumentation() {
                     check(has("arrow shows wind flow")) { "Wind direction symbol is missing" }
                     result.putString(
                         "checks",
-                        "removed forecast labels; wind compass accessible; all three tabs select their screen; bottom tab bar fixed during scroll; Places coordinate dialog cancels back to Places; forecast restored",
+                        "removed forecast labels; wind compass accessible; all four tabs select their screen; bottom tab bar fixed during scroll; Places search dialog cancels back to Places; forecast restored",
                     )
                 }
                 "lifecycle" -> {
@@ -273,11 +509,11 @@ class PhoneExercise : Instrumentation() {
                     } finally {
                         removeMonitor(monitor)
                     }
-                    click("Forecast")
-                    check(selected("Forecast"))
+                    click("Today")
+                    check(selected("Today"))
                     result.putString(
                         "checks",
-                        "Places selection and content survive Activity recreation; Forecast remains reachable",
+                        "Places selection and content survive Activity recreation; Today remains reachable",
                     )
                 }
                 "geocoding-probe" -> {
@@ -379,13 +615,33 @@ class PhoneExercise : Instrumentation() {
                         }
                         check(PlaceStore(targetContext).selected() == saved)
                         check(PlaceStore(targetContext).favourites().any { it == saved })
+                        // Opted-in fixture selections replace the removed manual-coordinate UI.
+                        fun fixture(place: Place) {
+                            runOnMainSync { owner.finish() }
+                            waitForIdleSync()
+                            PlaceStore(targetContext).select(place)
+                            owner =
+                                startActivitySync(
+                                    Intent(targetContext, MainActivity::class.java)
+                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                )
+                        }
+                        fixture(Place.MUNICH.copy(label = "Current location"))
+                        waitFor("device snapshot uses station name") {
+                            has("MUENCHEN STADT") &&
+                                !nodes().any { it.text?.toString() == "Current location" }
+                        }
                         click("Places")
-                        click("ENTER COORDINATES")
-                        enter("LABEL (OPTIONAL)", "Coverage test")
-                        enter("LATITUDE · −90 TO 90", "0")
-                        enter("LONGITUDE · −180 TO 180", "0")
-                        enter("TIME ZONE (OPTIONAL IANA ID)", "UTC")
-                        click("Use location")
+                        click("SAVE CURRENT AS FAVOURITE")
+                        check(
+                            nodes().any {
+                                it.isEditable &&
+                                    it.contentDescription?.toString() == "FAVOURITE LABEL" &&
+                                    it.text?.toString() == "MUENCHEN STADT"
+                            }
+                        )
+                        click("Cancel")
+                        fixture(Place("Coverage test", 0.0, 0.0, "UTC"))
                         waitFor("coverage explanation") {
                             has("No DWD forecast point within 50 km")
                         }
@@ -406,7 +662,7 @@ class PhoneExercise : Instrumentation() {
                         )
                         result.putString(
                             "checks",
-                            "explicit candidate coordinates/zone; nearest forecast distance; linked attribution; edited-provenance favourite and selection survive recreation; out-of-coverage forecast clears previous weather while radar remains available; original selected data restored",
+                            "explicit candidate coordinates/zone; nearest forecast distance; linked attribution; edited-provenance favourite and selection survive recreation; device snapshot displays station name; out-of-coverage forecast clears previous weather while radar remains available; original selected data restored",
                         )
                     } finally {
                         runOnMainSync { owner.finish() }
@@ -673,14 +929,6 @@ class PhoneExercise : Instrumentation() {
                         "Timeline must give the removed NOW label space back to the map"
                     }
                     val selectedPlace = PlaceStore(targetContext).selected()
-                    val initialCenter =
-                        "Precipitation map. Center " +
-                            String.format(
-                                java.util.Locale.US,
-                                "%.6f, %.6f",
-                                selectedPlace.lat.coerceIn(-85.05112878, 85.05112878),
-                                if (selectedPlace.lon == 180.0) -180.0 else selectedPlace.lon,
-                            )
                     radarGestures()
                     val recenter =
                         radarMapNode().actionList.first {
@@ -688,8 +936,19 @@ class PhoneExercise : Instrumentation() {
                         }
                     check(radarMapNode().performAction(recenter.id))
                     waitFor("accessible recenter restores selected-place center", 3000) {
-                        radarMapNode().contentDescription.toString().substringBefore("; zoom") ==
-                            initialCenter
+                        // A Mercator round-trip may cross a six-decimal rounding midpoint.
+                        // Require agreement within half of the displayed coordinate unit.
+                        val center =
+                            Regex("Center ([-0-9.]+), ([-0-9.]+);")
+                                .find(radarMapNode().contentDescription.toString())!!
+                        val dy =
+                            kotlin.math.abs(
+                                center.groupValues[1].toDouble() -
+                                    selectedPlace.lat.coerceIn(-85.05112878, 85.05112878)
+                            )
+                        val dx =
+                            kotlin.math.abs(center.groupValues[2].toDouble() - selectedPlace.lon)
+                        dy <= 0.500001e-6 && minOf(dx, 360 - dx) <= 0.500001e-6
                     }
                     waitFor("radar sequence", 180000) {
                         nodes().any {
@@ -730,77 +989,96 @@ class PhoneExercise : Instrumentation() {
                     )
                 }
                 "forecast" -> {
-                    click("Forecast")
-                    waitFor("forecast") { has("Temperature ") }
+                    click("Today")
+                    waitFor("today forecast") { has("Temperature ") }
+                    check(!has("HIGH") && !has("LOW"))
                     fun scroll(): AccessibilityNodeInfo =
                         nodes().first { it.className == "android.widget.ScrollView" }
-                    scroll().performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
-                    SystemClock.sleep(400)
-                    val outlook =
-                        nodes().firstOrNull {
-                            it.className == "android.widget.HorizontalScrollView"
-                        }
-                    check(outlook != null) { "Outlook is not scrollable" }
-                    repeat(6) {
-                        outlook.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
-                        SystemClock.sleep(120)
-                    }
-                    val last =
-                        java.util.Calendar.getInstance(
-                                java.util.TimeZone.getTimeZone("Europe/Berlin")
-                            )
-                            .apply { add(java.util.Calendar.DAY_OF_MONTH, 6) }
-                    check(has(Times.format(last.timeInMillis, "dd MMM", "Europe/Berlin"))) {
-                        "Seventh forecast day is not reachable"
-                    }
-                    var reached = false
-                    for (i in 0..16) {
-                        if (has("DATA TRANSMISSION")) {
-                            reached = true
-                            break
-                        }
+                    repeat(4) {
                         scroll().performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
                         SystemClock.sleep(150)
                     }
-                    check(reached && has("Issue") && has("Received")) {
-                        "Hourly detail or provenance footer is not reachable"
+                    check(has("HOURLY FORECAST") && has("NEXT 24 HOURS"))
+                    val hourly =
+                        nodes().firstOrNull {
+                            it.className == "android.widget.HorizontalScrollView"
+                        }
+                    check(hourly != null) { "Hourly timeline is not horizontally scrollable" }
+                    repeat(6) {
+                        hourly.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                        SystemClock.sleep(120)
                     }
-                    check(has("Relative humidity is not supplied")) {
-                        "Missing humidity is not explained"
+                    waitFor("hourly provenance footer") {
+                        has("DATA TRANSMISSION") && has("Issue") && has("Received")
                     }
+                    check(!has("no DWD value") && !has("Relative humidity is not supplied")) {
+                        "Removed hourly explanation remains"
+                    }
+                    click("Week")
+                    waitFor("week ahead") { has("HIGH") && has("LOW") }
+                    check(!has("Temperature ") && !has("HOURLY FORECAST"))
+                    repeat(8) {
+                        scroll().performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                        SystemClock.sleep(120)
+                    }
+                    val zone = PlaceStore(targetContext).selected().zone
+                    val last =
+                        java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone(zone)).apply {
+                            add(java.util.Calendar.DAY_OF_MONTH, 6)
+                        }
+                    check(has(Times.format(last.timeInMillis, "dd MMM", zone))) {
+                        "Seventh forecast day is not reachable"
+                    }
+                    check(has("Issue") && has("Received"))
+                    val monitor = addMonitor(MainActivity::class.java.name, null, false)
+                    try {
+                        runOnMainSync { activity.recreate() }
+                        check(waitForMonitorWithTimeout(monitor, 10000) != null)
+                        waitFor("Week restored after recreation") {
+                            nodes().any {
+                                it.contentDescription?.toString() == "Week" && it.isSelected
+                            }
+                        }
+                    } finally {
+                        removeMonitor(monitor)
+                    }
+                    click("Today")
                     repeat(20) {
                         scroll().performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
                     }
                     result.putString(
                         "checks",
-                        "forecast scroll; all seven days reachable; hourly detail traversed; missing humidity omitted; issue, validity and received footer visible",
+                        "Today contains current conditions and aligned hourly ribbon; horizontal hour scrolling and omitted missing humidity; Week contains seven reachable daily rows without current/hourly content; provenance footer on both; Week survives recreation",
                     )
                 }
                 "main" -> {
                     waitFor("live Munich forecast") { has("Temperature ") && has("LIVE") }
-                    click("PLACES")
-                    click("ENTER COORDINATES")
-                    enter("LATITUDE · −90 TO 90", "48.138108")
-                    enter("LONGITUDE · −180 TO 180", "11.574726")
-                    enter("LABEL (OPTIONAL)", "Munich")
-                    click("Use location")
                     waitFor("Munich forecast") { has("MUENCHEN STADT") && has("LIVE") }
                     click("PLACES")
                     click("SAVE CURRENT AS FAVOURITE")
                     enter("FAVOURITE LABEL", "Munich home")
                     click("Save")
                     click("PLACES")
-                    click("ENTER COORDINATES")
-                    enter("LATITUDE · −90 TO 90", "91")
-                    click("Use location")
-                    check(has("Enter location")) { "Invalid latitude accepted" }
-                    enter("LATITUDE · −90 TO 90", "52.5200")
-                    enter("LONGITUDE · −180 TO 180", "181")
-                    click("Use location")
-                    check(has("Enter location")) { "Invalid longitude accepted" }
-                    enter("LONGITUDE · −180 TO 180", "13.4050")
-                    enter("LABEL (OPTIONAL)", "Berlin test")
-                    click("Use location")
+                    click("SEARCH CITY")
+                    enter("CITY NAME", "Berlin")
+                    click("Search")
+                    waitFor("Berlin city result", 45000) {
+                        nodes().any {
+                            it.contentDescription
+                                ?.toString()
+                                ?.startsWith("Select city result 2950159;") == true
+                        }
+                    }
+                    click(
+                        nodes()
+                            .first {
+                                it.contentDescription
+                                    ?.toString()
+                                    ?.startsWith("Select city result 2950159;") == true
+                            }
+                            .contentDescription
+                            .toString()
+                    )
                     waitFor("Berlin live forecast") {
                         has("BERLIN") && has("LIVE") && has("Temperature ")
                     }
@@ -862,7 +1140,7 @@ class PhoneExercise : Instrumentation() {
                     click("Select favourite Munich home")
                     result.putString(
                         "checks",
-                        "live Munich; coordinate validation; live Berlin; save two favourites; radar pan; two-finger pinch; accessible zoom and recenter; scrub to +120; playback loop; select favourite",
+                        "live Munich; explicit Berlin search selection; live Berlin; save two favourites; radar pan; two-finger pinch; accessible zoom and recenter; scrub to +120; playback loop; select favourite",
                     )
                 }
                 "persistence" -> {

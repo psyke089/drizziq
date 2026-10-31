@@ -45,7 +45,7 @@ Add your SDK's `platform-tools` directory to `PATH`, or pass `--adb /path/to/adb
 adb -s SERIAL install -r app/build/outputs/apk/debug/app-debug.apk
 adb -s SERIAL install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 
-# Quick checks: tabs, Activity recreation, forecast scrolling, coordinate-dialog cancel, radar gestures, timeline scrubbing, playback, and map-camera persistence across force-stop/relaunch and Activity recreation.
+# Quick checks: square tabs, Today/Week separation, reserved download line, Activity recreation, hourly/daily scrolling, search-dialog cancel, radar gestures, timeline scrubbing, playback, and map-camera persistence across force-stop/relaunch and Activity recreation.
 python3 tools/verify_phone.py --serial SERIAL
 
 # Optional Places integration: selects/saves test places, restores originals and camera.

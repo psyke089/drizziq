@@ -1,6 +1,6 @@
 # Sunset visibility and nearby viewing spots
 
-Revised draft, 2026-10-31, against Drizziq **1.2.0**, commit `0d75471`.
+Revised draft, 2026-10-31, initially against Drizziq **1.2.0**, commit `0d75471`; navigation/place-entry references updated for the subsequent Today/Week UI revision.
 Supersedes `tmp/sunset-feature-spec.md`. This is a proposed feature, not part
 of the 1.2.0 release. Preparing this specification does not enable new services
 or authorize operating infrastructure.
@@ -28,8 +28,8 @@ distribution service or recurring weather pipeline.
 | --- | --- |
 | Android | Kotlin, API 24+, one `:app` module, native Views/Canvas, `MainActivity` and `Repository`. No map SDK, Compose, ViewModel, DI, Room, coroutines or WorkManager. |
 | Background work | Executors, Handler and generation tokens. Keep I/O/math off the UI thread and reject obsolete callbacks; no architecture migration is required. |
-| Navigation | Fixed Forecast / Radar / Places bottom tabs. Begin with a Sunset card/detail in Forecast; do not add a fourth tab implicitly. |
-| Places | City search, manual coordinates, optional one-shot Android location and saved snapshots. Reuse these paths and `choose()`. No second permission flow or automatic tracking. |
+| Navigation | Fixed Today / Week / Radar / Places bottom tabs. Begin with a Sunset card/detail in Today; do not add another tab implicitly. |
+| Places | City search, optional one-shot Android location and saved snapshots; no manual-coordinate entry. Reuse these paths and `choose()`. No second permission flow or automatic tracking. |
 | Coordinates and zones | `Place` stores full coordinates and an IANA zone. Use its civil date, not the phone or forecast station zone. `ZoneLookup` is available offline. |
 | Weather | Direct DWD MOSMIX station forecasts, with matching-station cache/freshness rules and a 50 km inclusive lookup limit. Open-Meteo is geocoding only. |
 | Map | `RadarMap` is a custom OSM tile renderer with radar-specific overlays, gestures and persistent camera. It is not an existing general spot/navigation screen. |
@@ -58,7 +58,7 @@ already exists. There is no fixed implementation-duration promise.
 
 ## 4. Interaction and presentation
 
-Increment A adds a compact Sunset card to Forecast with local date/time, true
+Increment A adds a compact Sunset card to Today with local date/time, true
 bearing clockwise from north, a generated glyph and a Details action. It remains
 available when the selected place is outside MOSMIX's 50 km coverage or weather
 loading fails. Keep astronomy independent of the existing empty-weather layout.

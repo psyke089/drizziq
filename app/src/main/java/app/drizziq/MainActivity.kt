@@ -3,6 +3,7 @@ package app.drizziq
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Typeface
@@ -33,18 +34,22 @@ class MainActivity : Activity() {
     private lateinit var placeTitle: TextView
     private lateinit var coordinates: TextView
     private lateinit var connection: TextView
+    private lateinit var progressLine: ProgressBar
+    private var progressSubscription: Cancel? = null
+    private val forecastOffsets = mutableMapOf<Page, Int>()
 
     private enum class Page {
-        FORECAST,
+        TODAY,
+        WEEK,
         RADAR,
         PLACES,
     }
 
-    private var page = Page.FORECAST
+    private var page = Page.TODAY
     private val tabs = mutableMapOf<Page, LinearLayout>()
     private lateinit var placesScroll: ScrollView
     private lateinit var forecastScroll: ScrollView
-    private lateinit var radarPanel: LinearLayout
+    private lateinit var radarPanel: FrameLayout
     private lateinit var map: RadarMap
     private lateinit var radarNotice: TextView
     private var frameError = false
@@ -113,14 +118,20 @@ class MainActivity : Activity() {
                 { repo.online },
                 { place ->
                     if (choose(place)) {
-                        showPage(Page.FORECAST)
+                        showPage(Page.TODAY)
                         true
                     } else false
                 },
-                { place -> locationEntry(place, true) },
+                { place -> zoneEntry(place) },
             )
         createLayout()
         ready = true
+        progressSubscription =
+            Http.downloads.observe { busy ->
+                handler.post {
+                    if (!dead) progressLine.visibility = if (busy) View.VISIBLE else View.INVISIBLE
+                }
+            }
         repo.connection()
         choose(store.selected(), false)
         (getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager)
@@ -128,7 +139,8 @@ class MainActivity : Activity() {
         showPage(
             savedInstanceState?.getString("page")?.let { name ->
                 Page.entries.firstOrNull { it.name == name }
-            } ?: Page.FORECAST
+                    ?: if (name == "FORECAST") Page.TODAY else null
+            } ?: Page.TODAY
         )
     }
 
@@ -136,7 +148,7 @@ class MainActivity : Activity() {
         root =
             column().apply {
                 setBackgroundColor(Hud.bg)
-                setPadding(dp(20), dp(12), dp(20), dp(12))
+                setPadding(0, dp(12), 0, dp(12))
             }
         if (android.os.Build.VERSION.SDK_INT >= 30) window.setDecorFitsSystemWindows(false)
         else
@@ -146,16 +158,16 @@ class MainActivity : Activity() {
                     View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
         root.setOnApplyWindowInsetsListener { v, insets ->
             v.setPadding(
-                dp(20),
+                insets.systemWindowInsetLeft,
                 insets.systemWindowInsetTop + dp(12),
-                dp(20),
+                insets.systemWindowInsetRight,
                 insets.systemWindowInsetBottom + dp(12),
             )
             insets
         }
         setContentView(root)
         root.requestApplyInsets()
-        val header = row()
+        val header = row().apply { setPadding(dp(20), 0, dp(20), 0) }
         header.addView(WeatherGlyph(this, logo = true), LinearLayout.LayoutParams(dp(36), dp(36)))
         val wordmark =
             label("DRIZZIQ", 19f).apply {
@@ -170,8 +182,19 @@ class MainActivity : Activity() {
         connection = label("CONNECTING", 9f, Hud.muted, true)
         header.addView(connection)
         root.addView(header)
-        root.space(18)
-        val location = row()
+        progressLine =
+            ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                tag = "download-progress"
+                contentDescription = "Downloads in progress"
+                isIndeterminate = true
+                indeterminateTintList = ColorStateList.valueOf(Hud.cyan)
+                visibility = View.INVISIBLE
+                minimumHeight = 0
+                setPadding(0, 0, 0, 0)
+            }
+        root.addView(progressLine, LinearLayout.LayoutParams(-1, dp(2)))
+        root.space(16)
+        val location = row().apply { setPadding(dp(20), 0, dp(20), 0) }
         val placeColumn = column()
         placeTitle =
             label("Munich", 28f).apply {
@@ -193,6 +216,7 @@ class MainActivity : Activity() {
             ScrollView(this).apply {
                 isFillViewport = true
                 clipToPadding = false
+                setPadding(dp(20), 0, dp(20), 0)
             }
         content.addView(forecastScroll, FrameLayout.LayoutParams(-1, -1))
         createRadar()
@@ -208,6 +232,7 @@ class MainActivity : Activity() {
             val tab =
                 column().apply {
                     gravity = Gravity.CENTER
+                    tag = "tab:${destination.name}"
                     isClickable = true
                     isFocusable = true
                     contentDescription =
@@ -236,8 +261,7 @@ class MainActivity : Activity() {
             if (tag != null) addView(label(tag, 9f, Hud.cyan, true))
         }
 
-    private fun buildForecast() {
-        val scroll = forecastScroll.scrollY
+    private fun buildForecast(scroll: Int = forecastScroll.scrollY) {
         val data = repo.forecast
         val forecast = data.data
         val place = repo.place
@@ -245,12 +269,6 @@ class MainActivity : Activity() {
         val body = column()
         forecastScroll.removeAllViews()
         forecastScroll.addView(body)
-        if (data.message != null) {
-            body.addView(
-                label(data.message, 12f, if (state == Freshness.ERROR) Hud.red else Hud.amber)
-            )
-            body.space(10)
-        }
         val now = System.currentTimeMillis()
         if (forecast == null) {
             val empty =
@@ -273,7 +291,9 @@ class MainActivity : Activity() {
             empty.space(12)
             empty.addView(
                 label(
-                    "Direct from Deutscher Wetterdienst.\nNearest forecast point resolved on this device.",
+                    if (state == Freshness.ERROR && data.message != null) data.message
+                    else
+                        "Direct from Deutscher Wetterdienst.\nNearest forecast point resolved on this device.",
                     14f,
                     Hud.muted,
                 )
@@ -283,215 +303,90 @@ class MainActivity : Activity() {
             body.addView(empty)
             return
         }
-        val current = forecast.current(now)
-        val hero =
-            column().apply {
-                pad(20)
-                background = panel()
-            }
-        if (current != null) {
-            val main = row()
-            val value = column()
-            current.temperature?.let {
-                value.addView(
-                    label("${number(it,1)}°", 76f).apply {
-                        typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
-                        contentDescription = "Temperature ${number(it,1)} degrees Celsius"
-                    }
+        if (page != Page.WEEK) {
+            val current = forecast.current(now)
+            val hero =
+                column().apply {
+                    pad(20)
+                    background = panel()
+                }
+            if (current != null) {
+                val main = row()
+                val value = column()
+                current.temperature?.let {
+                    value.addView(
+                        label("${number(it,1)}°", 76f).apply {
+                            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+                            contentDescription = "Temperature ${number(it,1)} degrees Celsius"
+                        }
+                    )
+                }
+                weatherLabel(current.condition)?.let { value.addView(label(it, 19f, Hud.cyan)) }
+                main.addView(value, LinearLayout.LayoutParams(0, -2, 1f))
+                main.addView(
+                    WeatherGlyph(this, current.condition),
+                    LinearLayout.LayoutParams(dp(98), dp(98)),
                 )
+                hero.addView(main)
+                hero.space(14)
+                current.wind?.let { speed ->
+                    val wind = row()
+                    wind.addView(label("WIND  ${number(speed,0)} km/h", 12f, Hud.ink, true))
+                    current
+                        .get("DD")
+                        ?.takeIf { it.isFinite() && it in 0.0..360.0 }
+                        ?.let { bearing ->
+                            wind.addView(
+                                WindDirectionGlyph(this, bearing),
+                                LinearLayout.LayoutParams(dp(42), dp(42)).apply {
+                                    leftMargin = dp(12)
+                                },
+                            )
+                            wind.addView(label(windDirectionName(bearing), 11f, Hud.cyan, true))
+                        }
+                    hero.addView(wind)
+                }
+                hero.space(8)
+                hero.addView(
+                    label(
+                        "Valid ${Times.format(current.time,"EEE dd MMM, HH:mm z",place.zone)}",
+                        11f,
+                        Hud.muted,
+                    )
+                )
+            } else {
+                hero.space(20)
+                hero.addView(label("No current forecast hour", 23f))
+                hero.space(8)
+                hero.addView(label("The last successful forecast remains below.", 13f, Hud.amber))
             }
-            weatherLabel(current.condition)?.let { value.addView(label(it, 19f, Hud.cyan)) }
-            main.addView(value, LinearLayout.LayoutParams(0, -2, 1f))
-            main.addView(
-                WeatherGlyph(this, current.condition),
-                LinearLayout.LayoutParams(dp(98), dp(98)),
-            )
-            hero.addView(main)
             hero.space(14)
-            current.wind?.let { speed ->
-                val wind = row()
-                wind.addView(label("WIND  ${number(speed,0)} km/h", 12f, Hud.ink, true))
-                current
-                    .get("DD")
-                    ?.takeIf { it.isFinite() && it in 0.0..360.0 }
-                    ?.let { bearing ->
-                        wind.addView(
-                            WindDirectionGlyph(this, bearing),
-                            LinearLayout.LayoutParams(dp(42), dp(42)).apply { leftMargin = dp(12) },
-                        )
-                        wind.addView(label(windDirectionName(bearing), 11f, Hud.cyan, true))
-                    }
-                hero.addView(wind)
-            }
-            hero.space(8)
+            hero.addView(
+                label("${forecast.station.name}  /  ${forecast.station.id}", 10f, Hud.muted, true)
+            )
+            hero.space(6)
             hero.addView(
                 label(
-                    "Valid ${Times.format(current.time,"EEE dd MMM, HH:mm z",place.zone)}",
+                    "Nearest forecast point · ${number(forecast.station.distance(place),1)} km away" +
+                        (forecast.station.elevation?.let { " · ${number(it,0)} m elevation" }
+                            ?: ""),
                     11f,
                     Hud.muted,
                 )
             )
-        } else {
-            hero.space(20)
-            hero.addView(label("No current forecast hour", 23f))
-            hero.space(8)
-            hero.addView(label("The last successful forecast remains below.", 13f, Hud.amber))
-        }
-        hero.space(14)
-        hero.addView(
-            label("${forecast.station.name}  /  ${forecast.station.id}", 10f, Hud.muted, true)
-        )
-        hero.space(6)
-        hero.addView(
-            label(
-                "Nearest forecast point · ${number(forecast.station.distance(place),1)} km away" +
-                    (forecast.station.elevation?.let { " · ${number(it,0)} m elevation" } ?: ""),
-                11f,
-                Hud.muted,
-            )
-        )
-        hero.space(5)
-        hero.addView(
-            label(
-                "Station ${coords(forecast.station.lat,forecast.station.lon)}",
-                10f,
-                Hud.muted,
-                true,
-            )
-        )
-        body.addView(hero)
-        body.space(22)
-        body.addView(section("7-DAY OUTLOOK"))
-        body.space(10)
-        val daily = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
-        val cards = row().apply { gravity = Gravity.TOP }
-        forecast.days(now, place.zone).forEach { day ->
-            val card =
-                column().apply {
-                    pad(14)
-                    background = panel()
-                }
-            card.addView(
-                label(Times.format(day.time, "EEE", place.zone).uppercase(), 12f, Hud.cyan, true)
-            )
-            card.space(4)
-            card.addView(label(Times.format(day.time, "dd MMM", place.zone), 11f, Hud.muted))
-            card.space(8)
-            card.addView(
-                WeatherGlyph(this, day.condition),
-                LinearLayout.LayoutParams(dp(64), dp(62)),
-            )
-            day.high?.let {
-                card.addView(
-                    label("${number(it,0)}° / ${day.low?.let {lo->number(lo,0)}?:"—"}°", 24f)
-                )
-            }
-            card.space(6)
-            weatherLabel(day.condition)?.let {
-                card.addView(label(it, 12f, Hud.muted).apply { minHeight = dp(30) })
-            }
-            card.space(8)
-            day.rain?.let {
-                card.addView(label("RAIN  ${number(it,1)} mm", 11f, Hud.ink, true))
-                card.space(7)
-            }
-            day.wind?.let {
-                card.addView(label("WIND  ${number(it,0)} km/h", 11f, Hud.ink, true))
-                card.space(7)
-            }
-            day.sun?.let {
-                card.addView(label("SUN   ${number(it,1)} h", 11f, Hud.ink, true))
-                card.space(7)
-            }
-            card.addView(
-                label(if (day.complete) "HOURLY RANGE" else "PARTIAL DAY", 9f, Hud.muted, true)
-            )
-            card.space(8)
-            card.addView(label(state.name, 9f, Hud.color(state), true))
-            cards.addView(
-                card,
-                LinearLayout.LayoutParams(dp(156), -2).apply { rightMargin = dp(10) },
-            )
-        }
-        daily.addView(cards)
-        body.addView(daily)
-        body.space(10)
-        body.addView(
-            label(
-                "High / low from available hourly temperatures; wind is the hourly maximum. Rain and sunshine totals appear only for complete local days.",
-                11f,
-                Hud.muted,
-            )
-        )
-        body.space(22)
-        val hours = forecast.hours.filter { it.time >= now }.take(48)
-        body.addView(section("HOURLY DETAIL", "${hours.size} HOURS"))
-        body.space(10)
-        body.addView(TemperatureTrace(this, hours), LinearLayout.LayoutParams(-1, dp(64)))
-        body.space(10)
-        val horizontal = HorizontalScrollView(this)
-        val table = column()
-        val humidity = hours.any { it.humidity != null }
-        fun tableRow(values: List<String>, head: Boolean = false): LinearLayout =
-            row().apply {
-                setPadding(0, dp(12), 0, dp(12))
-                if (head) background = panel()
-                values.forEachIndexed { i, v ->
-                    addView(
-                        label(
-                            v,
-                            if (head) 10f else 12f,
-                            if (head) Hud.muted else if (i == 1) Hud.cyan else Hud.ink,
-                            true,
-                        ),
-                        LinearLayout.LayoutParams(
-                            dp(if (i == 0) 110 else if (i == values.lastIndex) 65 else 80),
-                            -2,
-                        ),
-                    )
-                }
-            }
-        table.addView(
-            tableRow(
-                listOf("LOCAL TIME", "°C", "RAIN mm", "km/h", "FROM °") +
-                    (if (humidity) listOf("RH %") else emptyList()) +
-                    listOf("STATE"),
-                true,
-            )
-        )
-        hours.forEach { h ->
-            table.addView(
-                tableRow(
-                    listOf(
-                        Times.format(h.time, "EEE HH:mm", place.zone),
-                        h.temperature?.let { number(it, 1) } ?: "—",
-                        h.get("RR1c")?.let { number(it, 1) } ?: "—",
-                        h.wind?.let { number(it, 0) } ?: "—",
-                        h.get("DD")?.let { number(it, 0) } ?: "—",
-                    ) +
-                        (if (humidity) listOf(h.humidity?.let { number(it, 0) } ?: "—")
-                        else emptyList()) +
-                        state.name
+            hero.space(5)
+            hero.addView(
+                label(
+                    "Station ${coords(forecast.station.lat,forecast.station.lon)}",
+                    10f,
+                    Hud.muted,
+                    true,
                 )
             )
-            table.addView(
-                View(this).apply { setBackgroundColor(Hud.line) },
-                LinearLayout.LayoutParams(-1, 1),
-            )
-        }
-        horizontal.addView(table)
-        body.addView(horizontal)
-        body.space(12)
-        body.addView(
-            label(
-                "— = no DWD value. Rain refers to the preceding hour." +
-                    if (!humidity)
-                        " Relative humidity is not supplied by this forecast and is omitted."
-                    else "",
-                11f,
-                Hud.muted,
-            )
-        )
+            body.addView(hero)
+            body.space(22)
+            buildHourly(body, forecast, place, now)
+        } else buildWeek(body, forecast, place, now)
         body.space(20)
         val footer =
             column().apply {
@@ -524,11 +419,71 @@ class MainActivity : Activity() {
         forecastScroll.post { forecastScroll.scrollTo(0, scroll) }
     }
 
+    private fun buildHourly(body: LinearLayout, forecast: Forecast, place: Place, now: Long) {
+        val columns = hourlyColumns(forecast, now)
+        body.addView(section("HOURLY FORECAST", "NEXT 24 HOURS"))
+        body.space(12)
+        if (columns.isEmpty()) body.addView(label("No upcoming hourly forecast", 13f, Hud.muted))
+        else body.addView(HourlyForecast(this, columns, place.zone))
+    }
+
+    private fun buildWeek(body: LinearLayout, forecast: Forecast, place: Place, now: Long) {
+        val days = forecast.days(now, place.zone)
+        fun cell(
+            row: LinearLayout,
+            text: String,
+            weight: Float,
+            color: Int = Hud.ink,
+            size: Float = 12f,
+        ) {
+            row.addView(
+                label(text, size, color, true).apply { gravity = Gravity.CENTER },
+                LinearLayout.LayoutParams(0, -2, weight),
+            )
+        }
+        val head =
+            row().apply {
+                setPadding(0, dp(12), 0, dp(12))
+                setBackgroundColor(Hud.panel)
+            }
+        cell(head, "DAY", 1.35f, Hud.muted, 9f)
+        cell(head, "", .7f)
+        for ((name, weight) in
+            listOf(
+                "HIGH" to .8f,
+                "LOW" to .8f,
+                "RAIN\nmm" to 1f,
+                "WIND\nkm/h" to 1f,
+                "SUN\nh" to .8f,
+            )) cell(head, name, weight, Hud.muted, 9f)
+        body.addView(head)
+        for (day in days) {
+            val row = row().apply { setPadding(0, dp(14), 0, dp(14)) }
+            cell(row, Times.format(day.time, "EEE\ndd MMM", place.zone), 1.35f, Hud.cyan, 10f)
+            row.addView(
+                WeatherGlyph(this, day.condition).apply {
+                    contentDescription =
+                        weatherLabel(day.condition) ?: "No weather condition supplied"
+                },
+                LinearLayout.LayoutParams(0, dp(36), .7f),
+            )
+            cell(row, day.high?.let { "${number(it,0)}°" } ?: "—", .8f)
+            cell(row, day.low?.let { "${number(it,0)}°" } ?: "—", .8f, Hud.muted)
+            cell(row, day.rain?.let { number(it, 1) } ?: "—", 1f, Hud.cyan)
+            cell(row, day.wind?.let { number(it, 0) } ?: "—", 1f)
+            cell(row, day.sun?.let { number(it, 1) } ?: "—", .8f, Hud.amber)
+            body.addView(row)
+            body.addView(
+                View(this).apply { setBackgroundColor(Hud.line) },
+                LinearLayout.LayoutParams(-1, 1),
+            )
+        }
+    }
+
     private fun createRadar() {
-        radarPanel = column()
-        val viewport = FrameLayout(this)
+        radarPanel = FrameLayout(this)
         map = RadarMap(this)
-        viewport.addView(map, FrameLayout.LayoutParams(-1, -1))
+        radarPanel.addView(map, FrameLayout.LayoutParams(-1, -1))
         radarNotice =
             label("", 11f, Hud.amber).apply {
                 pad(8)
@@ -540,7 +495,7 @@ class MainActivity : Activity() {
                     if (sequence != null) requestFrame(frameIndex)
                 }
             }
-        viewport.addView(
+        radarPanel.addView(
             radarNotice,
             FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
                 topMargin = dp(8)
@@ -560,12 +515,15 @@ class MainActivity : Activity() {
                     )
                 }
             }
-        viewport.addView(
+        radarPanel.addView(
             attribution,
             FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END),
         )
-        radarPanel.addView(viewport, LinearLayout.LayoutParams(-1, 0, 1f))
-        val controls = row()
+        val controls =
+            row().apply {
+                tag = "radar-controls"
+                setPadding(dp(12), 0, dp(12), 0)
+            }
         playButton =
             ImageButton(this).apply {
                 setImageResource(R.drawable.ic_play)
@@ -586,25 +544,10 @@ class MainActivity : Activity() {
             timeline,
             LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(8) },
         )
-        radarPanel.addView(controls)
-        val legend =
-            row().apply {
-                contentDescription = "Precipitation legend, millimetres per five minutes"
-            }
-        for (i in 1..5) {
-            val cell = row()
-            cell.addView(
-                View(this).apply { setBackgroundColor(RadarPalette.colors[i]) },
-                LinearLayout.LayoutParams(dp(10), dp(3)),
-            )
-            cell.addView(
-                label("${RadarPalette.limits[i]}", 9f, Hud.muted, true),
-                LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(4) },
-            )
-            legend.addView(cell, LinearLayout.LayoutParams(0, -1, 1f))
-        }
-        legend.addView(label("mm/5min", 9f, Hud.muted, true))
-        radarPanel.addView(legend, LinearLayout.LayoutParams(-1, dp(18)))
+        radarPanel.addView(
+            controls,
+            FrameLayout.LayoutParams(-1, dp(40), Gravity.BOTTOM).apply { bottomMargin = dp(22) },
+        )
         content.addView(radarPanel, FrameLayout.LayoutParams(-1, -1))
     }
 
@@ -705,15 +648,17 @@ class MainActivity : Activity() {
     }
 
     private fun showPage(value: Page) {
+        if (page == Page.TODAY || page == Page.WEEK) forecastOffsets[page] = forecastScroll.scrollY
         page = value
         radarVisible = value == Page.RADAR
         radarPanel.visibility = if (radarVisible) View.VISIBLE else View.GONE
-        forecastScroll.visibility = if (value == Page.FORECAST) View.VISIBLE else View.GONE
+        forecastScroll.visibility =
+            if (value == Page.TODAY || value == Page.WEEK) View.VISIBLE else View.GONE
         placesScroll.visibility = if (value == Page.PLACES) View.VISIBLE else View.GONE
         tabs.forEach { (destination, tab) ->
             val selected = destination == value
             tab.isSelected = selected
-            tab.background = if (selected) panel(Hud.panel, Hud.panel, dp(12).toFloat()) else null
+            tab.background = if (selected) panel(Hud.panel, Hud.panel, 0f) else null
             (tab.getChildAt(0) as NavigationGlyph).apply {
                 highlighted = selected
                 invalidate()
@@ -722,11 +667,12 @@ class MainActivity : Activity() {
         }
         if (!radarVisible) setPlaying(false)
         if (value == Page.PLACES) locations()
+        if (value == Page.TODAY || value == Page.WEEK) buildForecast(forecastOffsets[value] ?: 0)
     }
 
     private fun render() {
         repo.age()
-        placeTitle.text = repo.place.label
+        placeTitle.text = placeDisplayName(repo.place, repo.forecastPoint?.station)
         coordinates.text = coords(repo.place.lat, repo.place.lon)
         placeCredit.visibility = if (repo.place.geocodeId == null) View.GONE else View.VISIBLE
         if (repo.place.geocodeId != null) placeCredit.text = placeCreditText(repo.place)
@@ -770,28 +716,11 @@ class MainActivity : Activity() {
 
     private fun locations() {
         val body = column().apply { pad(20) }
-        body.addView(label("SELECTED COORDINATES", 10f, Hud.muted, true))
-        body.space(8)
-        body.addView(label(repo.place.label, 22f))
-        if (repo.place.geocodeId != null) body.addView(placeCreditView(repo.place))
-        body.space(5)
-        body.addView(label(coords(repo.place.lat, repo.place.lon), 12f, Hud.muted, true))
-        body.space(16)
         placesScroll.removeAllViews()
         placesScroll.addView(body)
         body.addView(action("SEARCH CITY") { placeChoices.searchCity() })
         body.space(8)
         body.addView(action("USE CURRENT LOCATION") { placeChoices.currentLocation() })
-        body.space(6)
-        body.addView(
-            label(
-                "One position, resolved on this device. Location permission is optional for city search and coordinates.",
-                11f,
-                Hud.muted,
-            )
-        )
-        body.space(8)
-        body.addView(action("ENTER COORDINATES") { locationEntry() })
         body.space(8)
         body.addView(action("SAVE CURRENT AS FAVOURITE") { saveFavourite() })
         body.space(22)
@@ -814,7 +743,7 @@ class MainActivity : Activity() {
             val actions = row()
             actions.addView(
                 action("SELECT", "Select favourite ${place.label}") {
-                    if (choose(place)) showPage(Page.FORECAST)
+                    if (choose(place)) showPage(Page.TODAY)
                 },
                 LinearLayout.LayoutParams(0, dp(48), 1f),
             )
@@ -859,7 +788,6 @@ class MainActivity : Activity() {
         body: LinearLayout,
         title: String,
         value: String,
-        numeric: Boolean = false,
     ): EditText {
         body.addView(label(title, 11f, Hud.muted, true))
         body.space(4)
@@ -870,12 +798,7 @@ class MainActivity : Activity() {
                 textSize = 16f
                 setSingleLine(true)
                 contentDescription = title
-                inputType =
-                    if (numeric)
-                        InputType.TYPE_CLASS_NUMBER or
-                            InputType.TYPE_NUMBER_FLAG_DECIMAL or
-                            InputType.TYPE_NUMBER_FLAG_SIGNED
-                    else InputType.TYPE_CLASS_TEXT
+                inputType = InputType.TYPE_CLASS_TEXT
                 setPadding(dp(10), dp(8), dp(10), dp(8))
                 background = panel()
                 minimumHeight = dp(48)
@@ -885,67 +808,37 @@ class MainActivity : Activity() {
         return input
     }
 
-    private fun locationEntry(seed: Place? = null, requireZone: Boolean = false) {
+    private fun zoneEntry(seed: Place) {
         val token = placeChoices.invalidate()
         val body = column().apply { pad(20) }
-        val name = field(body, "LABEL (OPTIONAL)", seed?.label ?: "")
-        val lat =
-            field(body, "LATITUDE · −90 TO 90", (seed?.lat ?: repo.place.lat).toString(), true)
-        val lon =
-            field(body, "LONGITUDE · −180 TO 180", (seed?.lon ?: repo.place.lon).toString(), true)
-        val zone =
-            field(
-                body,
-                if (requireZone) "TIME ZONE (REQUIRED IANA ID)" else "TIME ZONE (OPTIONAL IANA ID)",
-                seed?.zone ?: "",
-            )
         body.addView(
             label(
-                if (requireZone)
-                    "Time zone could not be resolved. Enter a recognized IANA zone, e.g. Europe/Berlin."
-                else
-                    "Time zone is estimated offline when blank. Override near a time-zone border, e.g. Europe/Berlin. Manual entry needs no location permission.",
+                "Time zone could not be resolved for this place. Enter an IANA zone, e.g. Europe/Berlin.",
                 12f,
                 Hud.muted,
             )
         )
+        body.space(12)
+        val zone = field(body, "TIME ZONE (IANA ID)", "")
         val dialog =
             AlertDialog.Builder(this)
-                .setTitle("Enter location")
-                .setView(ScrollView(this).apply { addView(body) })
+                .setTitle("Time zone")
+                .setView(body)
                 .setNegativeButton("Cancel") { _, _ -> placeChoices.cancel(token) }
-                .setPositiveButton("Use location", null)
+                .setPositiveButton("Use place", null)
                 .create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 if (!placeChoices.isCurrent(token)) return@setOnClickListener
-                val a = lat.text.toString().trim().replace(',', '.').toDoubleOrNull()
-                val b = lon.text.toString().trim().replace(',', '.').toDoubleOrNull()
-                if (a == null || !a.isFinite() || a !in -90.0..90.0) {
-                    lat.error = "Latitude must be between −90 and 90"
-                    return@setOnClickListener
-                }
-                if (b == null || !b.isFinite() || b !in -180.0..180.0) {
-                    lon.error = "Longitude must be between −180 and 180"
-                    return@setOnClickListener
-                }
-                val tz =
-                    zone.text.toString().trim().ifBlank {
-                        runCatching { zones.at(a, b) }.getOrNull() ?: ""
-                    }
-                if (tz !in TimeZone.getAvailableIDs()) {
+                val value = zone.text.toString().trim()
+                if (value !in TimeZone.getAvailableIDs()) {
                     zone.error = "Use a valid IANA zone, such as Europe/Berlin"
                     return@setOnClickListener
                 }
-                val label =
-                    compactPlaceLabel(name.text.toString().trim()).ifBlank {
-                        "${number(a,3)}, ${number(b,3)}"
-                    }
-                val place =
-                    seed?.withCoordinates(a, b, tz)?.relabel(label) ?: Place(label, a, b, tz)
-                if (!choose(place)) return@setOnClickListener
-                dialog.dismiss()
-                showPage(Page.FORECAST)
+                if (choose(seed.copy(zone = value))) {
+                    dialog.dismiss()
+                    showPage(Page.TODAY)
+                }
             }
         }
         placeChoices.track(dialog, token)
@@ -955,7 +848,12 @@ class MainActivity : Activity() {
     private fun saveFavourite() {
         val token = placeChoices.invalidate()
         val body = column().apply { pad(20) }
-        val name = field(body, "FAVOURITE LABEL", repo.place.label)
+        val name =
+            field(
+                body,
+                "FAVOURITE LABEL",
+                placeDisplayName(repo.place, repo.forecastPoint?.station),
+            )
         val dialog =
             AlertDialog.Builder(this)
                 .setTitle("Save favourite")
@@ -1038,6 +936,8 @@ class MainActivity : Activity() {
         dead = true
         ready = false
         placeChoices.close()
+        progressSubscription?.cancel()
+        progressSubscription = null
         handler.removeCallbacksAndMessages(null)
         runCatching {
             (getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager)

@@ -17,9 +17,11 @@ Drizziq is a native Kotlin Android app for one selected place, specified in [SPE
 
 ## What it does
 
-- **Forecast.** Current forecast temperature, condition, wind and validity; a seven-day outlook with hourly temperature ranges, maximum wind, precipitation and sunshine; up to 48 hours of hourly detail. The selected coordinates, nearest DWD forecast station, distance, station elevation, forecast validity and issue time are explicit.
-- **Radar.** A large map with a subtle selected-place marker, drag to pan, pinch and double-tap zoom, a compact timeline and legend, and icon-based looping playback. The map center and zoom survive app restarts. Zoom and recenter are also available through accessibility actions. DWD RV supplies the preceding hour of observations and its available two-hour forecast, normally 37 frames. Each frame carries its actual DWD validity time. The legend shows millimetres per five minutes; hatching identifies missing radar data.
-- **Places.** Search cities using Open-Meteo, choose a single current-location snapshot, or enter coordinates. Munich is the initial location. Save labelled favourites, select them and delete them; favourites, coordinates, time zones and source attribution persist across restarts. Time zones are estimated offline when needed and can be overridden.
+- **Today.** Current DWD forecast conditions, wind compass and point metadata, followed by an aligned hourly timeline for the next 24 hours. Generated condition icons, a temperature ribbon, rain bars, wind and optional humidity share the same horizontal hour columns. Missing values remain unknown.
+- **Week.** A compact table for the coming seven days: condition, high/low, rain, maximum wind and sunshine. Daily rain/sunshine require complete local days.
+- **Radar.** A full-width map with a subtle selected-place marker, drag/pinch/double-tap gestures and transparent playback/timeline controls over the map. Center and zoom survive restarts; accessibility zoom/recenter actions remain available. DWD RV supplies recent observations and available forecasts. Attribution stays visible.
+- **Places.** Explicit city search using Open-Meteo or a one-shot Android location fix. Device snapshots display the resolved DWD station name. Save/select/delete labelled favourites; selection, full coordinates, zones and source attribution persist. Time zones resolve offline when needed, with a zone-only prompt if unresolved. Manual coordinate entry has been removed; existing saved places remain usable.
+- **Navigation and downloads.** Square Today, Week, Radar and Places tabs. A thin global progress line tracks weather, city-search and map-tile downloads in a reserved slot, so appearing/disappearing never moves the layout.
 - **Honest data states.** Forecast freshness is explicit; radar shows loading, cached, stale and error notices when needed. Failed refreshes retain timestamped successful data. Missing DWD fields are omitted; relative humidity is normally absent from MOSMIX. Daily rain and sunshine totals require every hourly interval of a complete local day.
 
 ## Build and install
@@ -42,7 +44,7 @@ Run the complete local development gate with:
 
 This checks Kotlin formatting, Python tooling tests, JVM unit tests, Android lint, and debug/release/device-test APK builds. No CI or phone is required. See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for test-first development, focused checks, debug signing, and quick versus full phone verification. [AGENTS.md](AGENTS.md) defines the workflow for agents.
 
-The default phone runner performs smoke checks. Use `--places-integration` for city selection and favourite persistence checks that restore the original places and map camera. Use `--full` explicitly for older integration checks that change test favourites and connectivity. Current Places results and measured station timings are in [VERIFICATION-1.2.0.md](docs/VERIFICATION-1.2.0.md); historical results and screenshot provenance are in [VERIFICATION.md](docs/VERIFICATION.md).
+The default phone runner performs smoke checks. Use `--places-integration` for city selection and favourite persistence checks that restore the original places and map camera. Use `--full` explicitly for older integration checks that change test favourites and connectivity. Current UI results are in [VERIFICATION-LAYOUT.md](docs/VERIFICATION-LAYOUT.md). Released Places results and measured station timings are in [VERIFICATION-1.2.0.md](docs/VERIFICATION-1.2.0.md); historical results and screenshot provenance are in [VERIFICATION.md](docs/VERIFICATION.md).
 
 ## Data
 
