@@ -198,6 +198,26 @@ class PhoneExercise : Instrumentation() {
         waitFor("double tap zoom", 3000) { zoom() > beforeDoubleTap }
     }
 
+    private fun contentHasTemperature(activity: android.app.Activity): Boolean {
+        var found = false
+        runOnMainSync {
+            fun views(root: android.view.View): List<android.view.View> =
+                listOf(root) +
+                    if (root is android.view.ViewGroup)
+                        (0 until root.childCount).flatMap { views(root.getChildAt(it)) }
+                    else emptyList()
+            val scroll =
+                views(activity.window.decorView)
+                    .filterIsInstance<android.widget.ScrollView>()
+                    .first { it.visibility == android.view.View.VISIBLE }
+            found =
+                views(scroll).any {
+                    it.contentDescription?.toString()?.startsWith("Temperature ") == true
+                }
+        }
+        return found
+    }
+
     override fun onStart() {
         val result = Bundle()
         try {
@@ -208,6 +228,91 @@ class PhoneExercise : Instrumentation() {
                 )
             waitFor("initial app") { has("PLACES") }
             when (phase) {
+                "header-weather" -> {
+                    click("Today")
+                    waitFor("current weather") { has("Temperature ") }
+                    var name: android.widget.TextView? = null
+                    var weather: android.view.View? = null
+                    var scroll: android.widget.ScrollView? = null
+                    runOnMainSync {
+                        name = activity.window.decorView.findViewWithTag("place-name")
+                        weather = activity.window.decorView.findViewWithTag("header-weather")
+                        fun views(root: android.view.View): List<android.view.View> =
+                            listOf(root) +
+                                if (root is android.view.ViewGroup)
+                                    (0 until root.childCount).flatMap { views(root.getChildAt(it)) }
+                                else emptyList()
+                        scroll =
+                            views(activity.window.decorView)
+                                .filterIsInstance<android.widget.ScrollView>()
+                                .first { it.visibility == android.view.View.VISIBLE }
+                    }
+                    check(name != null && weather != null) {
+                        "Current weather must be in the shared location header"
+                    }
+                    val nameBounds = Rect()
+                    val weatherBounds = Rect()
+                    val contentBounds = Rect()
+                    runOnMainSync {
+                        name!!.getGlobalVisibleRect(nameBounds)
+                        weather!!.getGlobalVisibleRect(weatherBounds)
+                        scroll!!.getGlobalVisibleRect(contentBounds)
+                    }
+                    check(
+                        nameBounds.right <= weatherBounds.left &&
+                            weatherBounds.bottom <= contentBounds.top
+                    ) {
+                        "Header weather must sit right of the name and above content"
+                    }
+                    check(!contentHasTemperature(activity)) {
+                        "Today still contains the duplicate current-weather card"
+                    }
+                    var original = ""
+                    runOnMainSync {
+                        original = name!!.text.toString()
+                        name!!.text =
+                            "A very long weather station name with several words near the mountains"
+                    }
+                    try {
+                        waitFor("wrapped station name", 3000) {
+                            var wrapped = false
+                            runOnMainSync { wrapped = name!!.lineCount == 2 }
+                            wrapped
+                        }
+                        var fits = false
+                        runOnMainSync {
+                            val box = Rect()
+                            name!!.getGlobalVisibleRect(box)
+                            fits =
+                                name!!.maxLines == 2 &&
+                                    name!!.ellipsize == android.text.TextUtils.TruncateAt.END &&
+                                    box.right <= weatherBounds.left &&
+                                    name!!.textSize /
+                                        activity.resources.displayMetrics.scaledDensity <= 22f
+                        }
+                        check(fits) { "Long names must wrap/ellipsize within their header column" }
+                    } finally {
+                        runOnMainSync { name!!.text = original }
+                    }
+                    val before = Rect()
+                    runOnMainSync { weather!!.getGlobalVisibleRect(before) }
+                    nodes()
+                        .first { it.className == "android.widget.ScrollView" }
+                        .performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                    val after = Rect()
+                    runOnMainSync { weather!!.getGlobalVisibleRect(after) }
+                    check(before == after) { "Header weather moved while scrolling" }
+                    for (page in listOf("Week", "Radar", "Places", "Today")) {
+                        click(page)
+                        check(has("Temperature ") && has("arrow shows wind flow")) {
+                            "Weather header missing on $page"
+                        }
+                    }
+                    result.putString(
+                        "checks",
+                        "weather sits right of wrapped/ellipsized station name; no duplicate Today card; header stays fixed and shared across tabs",
+                    )
+                }
                 "forecast-status" -> {
                     fun views(root: android.view.View): List<android.view.View> =
                         listOf(root) +
@@ -391,7 +496,9 @@ class PhoneExercise : Instrumentation() {
                     }
                     click("Week")
                     waitFor("week forecast") { has("HIGH") && has("LOW") }
-                    check(!has("Temperature ")) { "Right-now card leaked into Week" }
+                    check(!contentHasTemperature(activity)) {
+                        "Right-now card leaked into Week content"
+                    }
                     check(has("HIGH") && has("LOW"))
                     click("Places")
                     check(
@@ -994,11 +1101,11 @@ class PhoneExercise : Instrumentation() {
                     check(!has("HIGH") && !has("LOW"))
                     fun scroll(): AccessibilityNodeInfo =
                         nodes().first { it.className == "android.widget.ScrollView" }
+                    check(has("HOURLY FORECAST") && has("NEXT 24 HOURS"))
                     repeat(4) {
                         scroll().performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
                         SystemClock.sleep(150)
                     }
-                    check(has("HOURLY FORECAST") && has("NEXT 24 HOURS"))
                     val hourly =
                         nodes().firstOrNull {
                             it.className == "android.widget.HorizontalScrollView"
@@ -1016,7 +1123,7 @@ class PhoneExercise : Instrumentation() {
                     }
                     click("Week")
                     waitFor("week ahead") { has("HIGH") && has("LOW") }
-                    check(!has("Temperature ") && !has("HOURLY FORECAST"))
+                    check(!contentHasTemperature(activity) && !has("HOURLY FORECAST"))
                     repeat(8) {
                         scroll().performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
                         SystemClock.sleep(120)

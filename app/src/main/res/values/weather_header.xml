@@ -1,0 +1,11 @@
+<resources>
+    <string name="header_missing_value" translatable="false">—</string>
+    <string name="header_temperature">%1$.1f°</string>
+    <string name="header_wind_speed">%1$.0f km/h</string>
+    <string name="header_temperature_description">Temperature %1$.1f degrees Celsius · %2$s</string>
+    <string name="header_temperature_unavailable">Current temperature unavailable</string>
+    <string name="header_wind_description">Wind %1$.0f kilometres per hour · %2$s</string>
+    <string name="header_wind_unavailable">Current wind unavailable</string>
+    <string name="header_condition_description">%1$s. Forecast valid %2$s. %3$s.</string>
+    <string name="header_condition_unavailable">Current condition unavailable</string>
+</resources>

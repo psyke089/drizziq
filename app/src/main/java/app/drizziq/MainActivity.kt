@@ -32,6 +32,7 @@ class MainActivity : Activity() {
     private lateinit var root: LinearLayout
     private lateinit var content: FrameLayout
     private lateinit var placeTitle: TextView
+    private lateinit var currentWeather: CurrentWeatherHeader
     private lateinit var coordinates: TextView
     private lateinit var connection: TextView
     private lateinit var progressLine: ProgressBar
@@ -194,21 +195,37 @@ class MainActivity : Activity() {
             }
         root.addView(progressLine, LinearLayout.LayoutParams(-1, dp(2)))
         root.space(16)
-        val location = row().apply { setPadding(dp(20), 0, dp(20), 0) }
+        val location =
+            row().apply {
+                setPadding(dp(20), 0, dp(20), 0)
+                minimumHeight = dp(80)
+            }
         val placeColumn = column()
         placeTitle =
-            label("Munich", 28f).apply {
+            label("Munich", 20f).apply {
+                tag = "place-name"
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                minLines = 2
                 maxLines = 2
+                ellipsize = android.text.TextUtils.TruncateAt.END
             }
-        coordinates = label("", 11f, Hud.muted, true)
+        coordinates = label("", 9f, Hud.muted, true)
         placeColumn.addView(placeTitle)
         placeColumn.space(6)
         placeColumn.addView(coordinates)
-        placeCredit = placeCreditView().apply { visibility = View.GONE }
-        placeColumn.addView(placeCredit)
         location.addView(placeColumn, LinearLayout.LayoutParams(0, -2, 1f))
+        currentWeather = CurrentWeatherHeader(this)
+        location.addView(
+            currentWeather,
+            LinearLayout.LayoutParams(dp(140), -2).apply { leftMargin = dp(12) },
+        )
         root.addView(location)
+        placeCredit =
+            placeCreditView().apply {
+                visibility = View.GONE
+                setPadding(dp(20), dp(4), dp(20), 0)
+            }
+        root.addView(placeCredit)
         root.space(16)
         content = FrameLayout(this)
         root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -303,96 +320,46 @@ class MainActivity : Activity() {
             body.addView(empty)
             return
         }
-        if (page != Page.WEEK) {
-            val current = forecast.current(now)
-            val hero =
-                column().apply {
-                    pad(20)
-                    background = panel()
-                }
-            if (current != null) {
-                val main = row()
-                val value = column()
-                current.temperature?.let {
-                    value.addView(
-                        label("${number(it,1)}°", 76f).apply {
-                            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
-                            contentDescription = "Temperature ${number(it,1)} degrees Celsius"
-                        }
-                    )
-                }
-                weatherLabel(current.condition)?.let { value.addView(label(it, 19f, Hud.cyan)) }
-                main.addView(value, LinearLayout.LayoutParams(0, -2, 1f))
-                main.addView(
-                    WeatherGlyph(this, current.condition),
-                    LinearLayout.LayoutParams(dp(98), dp(98)),
-                )
-                hero.addView(main)
-                hero.space(14)
-                current.wind?.let { speed ->
-                    val wind = row()
-                    wind.addView(label("WIND  ${number(speed,0)} km/h", 12f, Hud.ink, true))
-                    current
-                        .get("DD")
-                        ?.takeIf { it.isFinite() && it in 0.0..360.0 }
-                        ?.let { bearing ->
-                            wind.addView(
-                                WindDirectionGlyph(this, bearing),
-                                LinearLayout.LayoutParams(dp(42), dp(42)).apply {
-                                    leftMargin = dp(12)
-                                },
-                            )
-                            wind.addView(label(windDirectionName(bearing), 11f, Hud.cyan, true))
-                        }
-                    hero.addView(wind)
-                }
-                hero.space(8)
-                hero.addView(
-                    label(
-                        "Valid ${Times.format(current.time,"EEE dd MMM, HH:mm z",place.zone)}",
-                        11f,
-                        Hud.muted,
-                    )
-                )
-            } else {
-                hero.space(20)
-                hero.addView(label("No current forecast hour", 23f))
-                hero.space(8)
-                hero.addView(label("The last successful forecast remains below.", 13f, Hud.amber))
-            }
-            hero.space(14)
-            hero.addView(
-                label("${forecast.station.name}  /  ${forecast.station.id}", 10f, Hud.muted, true)
-            )
-            hero.space(6)
-            hero.addView(
-                label(
-                    "Nearest forecast point · ${number(forecast.station.distance(place),1)} km away" +
-                        (forecast.station.elevation?.let { " · ${number(it,0)} m elevation" }
-                            ?: ""),
-                    11f,
-                    Hud.muted,
-                )
-            )
-            hero.space(5)
-            hero.addView(
-                label(
-                    "Station ${coords(forecast.station.lat,forecast.station.lon)}",
-                    10f,
-                    Hud.muted,
-                    true,
-                )
-            )
-            body.addView(hero)
-            body.space(22)
-            buildHourly(body, forecast, place, now)
-        } else buildWeek(body, forecast, place, now)
+        if (page != Page.WEEK) buildHourly(body, forecast, place, now)
+        else buildWeek(body, forecast, place, now)
         body.space(20)
         val footer =
             column().apply {
                 pad(14)
                 background = panel()
             }
+        footer.addView(
+            label("${forecast.station.name} / ${forecast.station.id}", 10f, Hud.muted, true)
+        )
+        footer.space(6)
+        footer.addView(
+            label(
+                "Nearest forecast point · ${number(forecast.station.distance(place),1)} km away" +
+                    (forecast.station.elevation?.let { " · ${number(it,0)} m elevation" } ?: ""),
+                11f,
+                Hud.muted,
+            )
+        )
+        footer.space(5)
+        footer.addView(
+            label(
+                "Station ${coords(forecast.station.lat,forecast.station.lon)}",
+                10f,
+                Hud.muted,
+                true,
+            )
+        )
+        forecast.current(now)?.let { hour ->
+            footer.space(6)
+            footer.addView(
+                label(
+                    "Valid ${Times.format(hour.time,"EEE dd MMM, HH:mm z",place.zone)}",
+                    11f,
+                    Hud.muted,
+                )
+            )
+        }
+        footer.space(12)
         footer.addView(label("DATA TRANSMISSION  /  ${state.name}", 10f, Hud.color(state), true))
         footer.space(8)
         footer.addView(
@@ -674,6 +641,11 @@ class MainActivity : Activity() {
         repo.age()
         placeTitle.text = placeDisplayName(repo.place, repo.forecastPoint?.station)
         coordinates.text = coords(repo.place.lat, repo.place.lon)
+        currentWeather.bind(
+            repo.forecast.data?.current(System.currentTimeMillis()),
+            repo.forecast.state,
+            repo.place.zone,
+        )
         placeCredit.visibility = if (repo.place.geocodeId == null) View.GONE else View.VISIBLE
         if (repo.place.geocodeId != null) placeCredit.text = placeCreditText(repo.place)
         connection.text = if (repo.online) "DWD / ONLINE" else "OFFLINE"

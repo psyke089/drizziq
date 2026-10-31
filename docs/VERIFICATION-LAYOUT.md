@@ -38,3 +38,9 @@ The new `copy-cleanup` phone regression first failed with “Today explanation r
 ## Forecast status banner removal
 
 Removed the transient message banner above Today/Week content. Error details remain inside the existing empty-state card, and freshness remains in the footer. A focused `forecast-status` device regression reproduced banner insertion during a real refresh before the fix; afterward both Today and Week retained the same content top with no banner inserted. The complete local gate passed again (66 JVM tests, 18 tooling tests, formatting, lint and all APK builds). The fixed app is installed and open on the phone; saved data and permissions are unchanged.
+
+## Shared current-weather header
+
+Checkpoint `3f2898a` commits the preceding Today/Week, radar, Places and status-banner changes. The subsequent header revision moves temperature, condition icon and wind to the right of the selected location/station on every tab. Names use 20-sp text, two reserved lines and end ellipsis. Weather slots retain their dimensions when unavailable. The duplicate Today card is removed; station metadata, validity and provenance remain in the forecast footer.
+
+The new `header-weather` device regression first failed against the checkpoint, then passed: weather sits right of the name and above scrolling content, a long test name wraps/ellipsizes without overlap, no duplicate current-temperature card remains, and the header stays fixed across scrolling and all tabs. The complete local gate passed (66 JVM tests, 18 tooling tests, formatting, lint and all APK builds). All nine standard/Places phone phases passed, including clearing header weather outside forecast coverage and restoring saved data. The focused refresh-stability regression also passed on Today and Week. One brief actual-phone header preview was inspected; the final build remains installed and open.
