@@ -13,7 +13,7 @@
   <img src="docs/screenshot.png" alt="Drizziq Today view on a OnePlus 5T, with the hourly forecast and SVG weather icons" width="300">
 </p>
 
-Raw capture from the current debug build on a OnePlus 5T / Android 13.
+Raw capture from the current debug build on a OnePlus 5T / Android 13. Weather data © Deutscher Wetterdienst, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 Drizziq is a native Kotlin Android app for one selected place. It reads weather directly from Deutscher Wetterdienst open data and runs on Android 7.0+ (API 24). No accounts, ads, analytics or tracking. Location permission is optional and used only for an explicit current-location request.
 

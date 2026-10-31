@@ -655,6 +655,21 @@ class PhoneExercise : Instrumentation() {
                     check(name != null && weather != null) {
                         "Current weather must be in the shared location header"
                     }
+                    var sourceView: android.widget.TextView? = null
+                    runOnMainSync {
+                        sourceView = activity.window.decorView.findViewWithTag("dwd-source")
+                    }
+                    val source = sourceView
+                    check(source != null) { "Header must credit the DWD source" }
+                    check(
+                        source.lineCount == 3 &&
+                            source.text.toString() == "Quelle:\nDeutscher\nWetterdienst"
+                    ) {
+                        "DWD source note must put one word on each line"
+                    }
+                    check(source.contentDescription == "Quelle: Deutscher Wetterdienst") {
+                        "DWD source note needs an accessible label"
+                    }
                     val nameBounds = Rect()
                     val weatherBounds = Rect()
                     val contentBounds = Rect()
@@ -668,6 +683,18 @@ class PhoneExercise : Instrumentation() {
                             weatherBounds.bottom <= contentBounds.top
                     ) {
                         "Header weather must sit right of the name and above content"
+                    }
+                    val sourceBounds = Rect()
+                    val windowBounds = Rect()
+                    runOnMainSync {
+                        source.getGlobalVisibleRect(sourceBounds)
+                        activity.window.decorView.getGlobalVisibleRect(windowBounds)
+                    }
+                    check(
+                        windowBounds.right - sourceBounds.right <= targetContext.dp(24) &&
+                            sourceBounds.top < nameBounds.top
+                    ) {
+                        "DWD source note must sit in the header's top-right corner"
                     }
                     check(!contentHasTemperature(activity)) {
                         "Today still contains the duplicate current-weather card"
@@ -1361,6 +1388,17 @@ class PhoneExercise : Instrumentation() {
                     }
                     click("Cancel")
                     click("CLEAR SEARCH CACHE")
+                    click("DATA & LICENCES")
+                    waitFor("licence dialog", 5000) { has("Application licence (MIT)") }
+                    check(
+                        has("Quelle: Deutscher Wetterdienst") &&
+                            has("Apache License") &&
+                            has("GNU General Public License") &&
+                            has("jHDF MIT licence")
+                    ) {
+                        "Licence dialog must include the full notices"
+                    }
+                    click("Close")
                     check(
                         PlaceStore(targetContext).favourites() == favourites &&
                             PlaceStore(targetContext).selected() == original

@@ -17,6 +17,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
     buildTypes { release { isMinifyEnabled = false } }
+    buildFeatures { buildConfig = true }
     lint {
         warningsAsErrors = true
     }

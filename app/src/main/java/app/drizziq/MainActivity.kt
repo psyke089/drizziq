@@ -208,6 +208,15 @@ class MainActivity : Activity() {
             wordmark,
             LinearLayout.LayoutParams(0, dp(36), 1f).apply { leftMargin = dp(10) },
         )
+        header.addView(
+            label("Quelle:\nDeutscher\nWetterdienst", 8f, Hud.muted, true).apply {
+                tag = "dwd-source"
+                gravity = Gravity.END
+                contentDescription = "Quelle: Deutscher Wetterdienst"
+                letterSpacing = .04f
+            },
+            LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.TOP },
+        )
         root.addView(header)
         progressLine =
             ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {

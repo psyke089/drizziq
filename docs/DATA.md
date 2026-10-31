@@ -8,7 +8,7 @@ Source: **Deutscher Wetterdienst (DWD)**, [DWD open data](https://opendata.dwd.d
 - Radar: `radar/composite/rv/composite_rv_LATEST.tar` and the observed member of the preceding twelve five-minute archives. As served on 2026-10-22, these contain ODIM HDF5 uint32 ACRR rasters, 1100 × 1200 pixels, with the WGS84 DE1200 polar stereographic projection declared in the files.
 - Station metadata: [official MOSMIX station catalogue](https://www.dwd.de/DE/leistungen/met_verfahren_mosmix/mosmix_stationskatalog.cfg?view=nasPublication&nn=16102), bundled as `app/src/main/assets/stations.tsv`. Retrieved 2026-10-22. Catalogue degrees/minutes are converted to decimal degrees. The forecast's own KML coordinates and elevation are displayed with the reading.
 
-The app converts Kelvin to Celsius and m/s to km/h, groups hourly temperatures into available daily ranges, and totals hourly rain/sunshine only when all intervals of a complete local day exist. Wind in the outlook is the maximum provided hourly speed. Daily condition is the most severe supplied hourly condition. A day's completeness respects 23/25-hour daylight-saving transitions. Forecast values remain station forecasts; the app does not spatially interpolate them. Relative humidity is only displayed if DWD provides it, and is never calculated from dew point.
+The shared app header shows the DWD source note (`Quelle: Deutscher Wetterdienst`) on every screen; the Places screen’s Data & licences dialog carries the full attribution and licence texts. The app converts Kelvin to Celsius and m/s to km/h, groups hourly temperatures into available daily ranges, and totals hourly rain/sunshine only when all intervals of a complete local day exist. Wind in the outlook is the maximum provided hourly speed. Daily condition is the most severe supplied hourly condition. A day's completeness respects 23/25-hour daylight-saving transitions. Forecast values remain station forecasts; the app does not spatially interpolate them. Relative humidity is only displayed if DWD provides it, and is never calculated from dew point.
 
 The parser retains `R101` (probability of precipitation greater than 0.1 mm in the preceding hour, already 0–100 percent) and `FX1` (maximum gust in the preceding hour, converted from m/s to km/h). Missing/out-of-range probability and invalid gust values remain unknown; a 3/12-hour gust is never substituted. The shared forecast details card shows current-hour `PPPP` (DWD reduced surface pressure, converted from Pa to hPa) when available, and the selected place’s IANA timezone. Fields and units were checked against DWD’s [element definition](https://opendata.dwd.de/weather/lib/MetElementDefinition.xml) on 2026-10-31. The linked meteoblue page is a visual/quantity reference; the app continues using DWD weather.
 
@@ -54,7 +54,7 @@ Run `python tools/update_metadata.py` to regenerate the station catalogue and pi
 
 ## Code and visual assets
 
-The application uses Android's native UI, HTTPS networking, bitmap renderer and touch APIs. Editable icon sources live in [`artwork/icons/`](../artwork/icons/README.md). The weather set was supplied by the user from their local `todo-0/assets/weather/` project and restyled to Drizziq's palette; mixed-precipitation and remaining UI icons were authored locally. `tools/generate_icons.py` compiles the SVGs to native Android vectors during builds, without a runtime SVG library. The existing launcher safe zone is preserved. Text uses Android system fonts. The README badge SVGs are authored in this repository. The committed screenshots are raw captures of the running app on the USB-connected OnePlus 5T.
+The application uses Android's native UI, HTTPS networking, bitmap renderer and touch APIs. Editable icon sources live in [`artwork/icons/`](../artwork/icons/README.md). The weather set was created from scratch by the author for a personal `todo-0` project and adapted here to Drizziq's palette; the adapted artwork is copyright 2026 k4r and distributed under the application's MIT licence. Mixed-precipitation and remaining UI icons were authored locally under the same licence. `tools/generate_icons.py` compiles the SVGs to native Android vectors during builds, without a runtime SVG library. The existing launcher safe zone is preserved. Text uses Android system fonts. The README badge SVGs are authored in this repository. The committed screenshots are raw captures of the running app on the USB-connected OnePlus 5T. Full third-party licence texts and NOTICEs are bundled in [`app/src/main/assets/notices.txt`](../app/src/main/assets/notices.txt).
 
 Condition mapping follows DWD's [MOSMIX weather-code workbook](https://www.dwd.de/DE/leistungen/opendata/help/schluessel_datenformate/kml/mosmix_element_weather_xls.xlsx?__blob=publicationFile&v=1), checked on 2026-10-31, including rime fog 49 and mixed precipitation 68/69/83/84. Explicit source intensities take precedence; the app's hourly-amount and wind-speed icon thresholds are documented with the SVGs. These visual thresholds do not change forecast values or constitute warning levels.
 
@@ -62,10 +62,11 @@ Direct dependencies:
 
 | Component | Purpose | Licence |
 | --- | --- | --- |
-| Kotlin standard library | Kotlin runtime | Apache 2.0 |
+| Kotlin standard library 2.2.10 | Kotlin runtime | Apache 2.0 |
+| org.jetbrains annotations 13.0 | Kotlin nullability annotations | Apache 2.0 |
 | [jHDF 0.13.0](https://github.com/jamesmudd/jhdf/tree/v0.13.0) | HDF5 decoder for DWD radar | [MIT](licenses/jhdf-MIT.txt) |
-| Android desugar JDK libraries 2.1.5 | Java library compatibility on API 24 | GPLv2 with Classpath Exception; associated notices in the distribution |
+| Android desugar JDK libraries 2.1.5 | Java library compatibility on API 24 | GPLv2 with Classpath Exception; full text in the bundled notices |
 | JUnit 4.13.2 | JVM tests only | EPL 1.0 |
-| org.json 20250517 | JVM JSON tests only; Android uses platform JSON | Public domain |
+| org.json 20260814 | JVM JSON tests only; Android uses platform JSON | Public domain |
 
 jHDF transitively uses SLF4J (MIT), Apache Commons Lang (Apache 2.0), compress-lzf (Apache 2.0), and lz4-java (Apache 2.0). They support the reader's metadata and compression handling. Android builds use D8 and core-library desugaring for compatibility with the app's minimum API 24. No analytics, map SDK, web UI framework or weather aggregator is used. Foreground location uses Android platform providers only.

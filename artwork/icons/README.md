@@ -4,10 +4,12 @@ SVG is the source of truth. Edit the files here; Android builds automatically
 regenerate their native VectorDrawable resources. No SVG runtime library or
 network access is needed.
 
-- `weather/`: the 32 weather SVGs supplied from the user's `todo-0` project,
-  adapted to Drizziq's cyan/amber outline palette without gradients or glow.
-  Four additional mixed rain/snow icons retain the supplied snow shapes and
-  add rain strokes for MOSMIX codes 68/69 and 83/84.
+- `weather/`: the 32 weather SVGs created from scratch by the author for a
+  personal `todo-0` project, adapted here to Drizziq's cyan/amber outline
+  palette without gradients or glow. The adapted artwork is copyright 2026 k4r
+  and distributed under the application's MIT licence (see `LICENSE`).
+  Four additional mixed rain/snow icons reuse the same snow shapes and add
+  rain strokes for MOSMIX codes 68/69 and 83/84.
 - `ui/`: locally authored SVG versions of all other app icons: metric labels,
   navigation, sunrise/sunset, wind compass/arrow, radar crosshair, playback,
   wordmark symbol, launcher artwork and an explicit unknown-condition symbol.
