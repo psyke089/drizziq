@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://codeberg.org/k4r/drizziq"><img src="docs/badges/codeberg.svg" alt="Codeberg · private repository"></a>
-  <a href="app/build.gradle.kts"><img src="docs/badges/version.svg" alt="Version 1.3.0"></a>
+  <a href="app/build.gradle.kts"><img src="docs/badges/version.svg" alt="Version 1.4.0"></a>
   <img src="docs/badges/android.svg" alt="Android 7.0+ · API 24">
   <a href="LICENSE"><img src="docs/badges/license.svg" alt="Licence MIT"></a>
 </p>

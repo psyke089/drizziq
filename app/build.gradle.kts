@@ -7,8 +7,8 @@ android {
         applicationId = "app.drizziq"
         minSdk = 24
         targetSdk = 37
-        versionCode = 4
-        versionName = "1.3.0"
+        versionCode = 5
+        versionName = "1.4.0"
         testInstrumentationRunner = "app.drizziq.PhoneExercise"
     }
     compileOptions {
@@ -28,7 +28,7 @@ dependencies {
     implementation("io.jhdf:jhdf:0.13.0")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.json:json:20250517")
+    testImplementation("org.json:json:20260814")
 }
 
 val generateIcons by
