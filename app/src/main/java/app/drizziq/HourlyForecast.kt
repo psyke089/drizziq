@@ -57,13 +57,11 @@ class HourlyForecast(
             contentDescription = "Hourly forecast timeline"
             addView(track, LayoutParams(context.dp(56) * columns.size, -2))
         }
-        addView(rail, LayoutParams(context.dp(58), -2))
+        addView(rail, LayoutParams(context.dp(29), -2))
         addView(horizontal, LayoutParams(0, -2, 1f))
         fun title(metric: ForecastMetric, height: Int, unit: String = "") {
             rail.addView(
-                ForecastMetricLabel(context, metric, unit).apply {
-                    gravity = Gravity.START or Gravity.CENTER_VERTICAL
-                },
+                ForecastMetricLabel(context, metric, unit),
                 LayoutParams(-1, context.dp(height)),
             )
         }

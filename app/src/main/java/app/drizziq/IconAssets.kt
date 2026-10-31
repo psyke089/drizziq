@@ -4,6 +4,7 @@ package app.drizziq
 object IconAssets {
     fun resource(name: String): Int =
         when (name) {
+            "delete" -> R.drawable.ic_delete
             "launcher-foreground" -> R.drawable.ic_launcher_foreground
             "launcher-legacy" -> R.drawable.ic_launcher_legacy
             "location-crosshair" -> R.drawable.ic_location_crosshair

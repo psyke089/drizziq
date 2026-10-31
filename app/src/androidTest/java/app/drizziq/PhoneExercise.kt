@@ -269,6 +269,81 @@ class PhoneExercise : Instrumentation() {
                             map.dispose()
                             parent.removeView(map)
                         }
+
+                        fun descendants(root: android.view.View): List<android.view.View> =
+                            listOf(root) +
+                                if (root is android.view.ViewGroup)
+                                    (0 until root.childCount).flatMap {
+                                        descendants(root.getChildAt(it))
+                                    }
+                                else emptyList()
+
+                        val hourly =
+                            HourlyForecast(
+                                targetContext,
+                                listOf(HourlyColumn(Times.parse("2026-10-22T12:00:00Z"), null)),
+                                "UTC",
+                                0,
+                            )
+                        hourly.measure(
+                            android.view.View.MeasureSpec.makeMeasureSpec(
+                                targetContext.dp(320),
+                                android.view.View.MeasureSpec.EXACTLY,
+                            ),
+                            android.view.View.MeasureSpec.makeMeasureSpec(
+                                0,
+                                android.view.View.MeasureSpec.UNSPECIFIED,
+                            ),
+                        )
+                        hourly.layout(0, 0, hourly.measuredWidth, hourly.measuredHeight)
+                        check(hourly.getChildAt(0).width == targetContext.dp(29)) {
+                            "Hourly legend must be half its former width"
+                        }
+                        descendants(hourly)
+                            .filterIsInstance<ForecastMetricLabel>()
+                            .filter { it.childCount > 1 }
+                            .forEach { metric ->
+                                check(metric.getChildAt(1).top >= metric.getChildAt(0).bottom) {
+                                    "Hourly unit must sit below its metric icon"
+                                }
+                            }
+
+                        val weekday = WeekDayLabel(targetContext, "Sat", "31 Oct")
+                        val weekdayText =
+                            descendants(weekday)
+                                .filterIsInstance<android.widget.TextView>()
+                                .associateBy { it.tag }
+                        check(
+                            weekdayText.getValue("week-weekday").textSize >
+                                weekdayText.getValue("week-date").textSize
+                        ) {
+                            "Weekday must be larger than the date"
+                        }
+
+                        var selected = 0
+                        var deleted = 0
+                        val favourite =
+                            FavouriteCard(
+                                targetContext,
+                                Place.MUNICH.copy(label = "Test favourite"),
+                                selected = true,
+                                select = { selected++ },
+                                delete = { deleted++ },
+                            )
+                        check(favourite.isClickable && favourite.isSelected)
+                        check(favourite.contentDescription == "Select favourite Test favourite")
+                        check(favourite.performClick() && selected == 1)
+                        check(
+                            descendants(favourite).filterIsInstance<android.widget.Button>().none {
+                                it.text.toString() in listOf("SELECT", "DELETE")
+                            }
+                        ) {
+                            "Favourite cards must not show text action buttons"
+                        }
+                        val delete = descendants(favourite).first { it.tag == "favourite-delete" }
+                        check(delete.performClick() && deleted == 1 && selected == 1) {
+                            "Delete icon must delete without selecting the favourite"
+                        }
                     }
                     for ((file, time) in
                         listOf(
@@ -314,7 +389,7 @@ class PhoneExercise : Instrumentation() {
                     }
                     result.putString(
                         "checks",
-                        "Radar tap/drag/accessibility click dispatch, observed/forecast fixture decoding and themed launcher mask rendering",
+                        "Radar tap/drag/accessibility click dispatch; compact hourly legend; week typography; favourite-card selection/delete; observed/forecast fixture decoding; themed launcher mask rendering",
                     )
                 }
                 "svg-icons" -> {
@@ -322,6 +397,7 @@ class PhoneExercise : Instrumentation() {
                         ((0..99).map { weatherIconName(it) } +
                                 ForecastMetric.entries.map { "metric-${it.name.lowercase()}" } +
                                 listOf(
+                                    "delete",
                                     "nav-today",
                                     "nav-week",
                                     "nav-radar",
@@ -785,6 +861,7 @@ class PhoneExercise : Instrumentation() {
                 "layout" -> {
                     click("Today")
                     waitFor("today forecast") { has("Temperature ") }
+                    check(!has("DWD / ONLINE")) { "Connection label remains in header" }
                     check(!has("7-DAY OUTLOOK"))
                     val before = Rect()
                     nodes()
@@ -833,6 +910,48 @@ class PhoneExercise : Instrumentation() {
                         "Right-now card leaked into Week content"
                     }
                     check(has("Maximum temperature") && has("Minimum temperature"))
+                    val heading =
+                        nodes().first {
+                            it.contentDescription?.toString()?.startsWith("Maximum temperature") ==
+                                true
+                        }
+                    val headingBefore = Rect().apply { heading.getBoundsInScreen(this) }
+                    val weekScroll =
+                        nodes().first {
+                            it.className == "android.widget.ScrollView" && it.isScrollable
+                        }
+                    check(weekScroll.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD))
+                    waitFor("week header stays visible", 3000) { has("Maximum temperature") }
+                    val headingAfter =
+                        Rect().apply {
+                            nodes()
+                                .first {
+                                    it.contentDescription
+                                        ?.toString()
+                                        ?.startsWith("Maximum temperature") == true
+                                }
+                                .getBoundsInScreen(this)
+                        }
+                    check(headingBefore == headingAfter) { "Week header moved during scrolling" }
+                    runOnMainSync {
+                        fun views(root: android.view.View): List<android.view.View> =
+                            listOf(root) +
+                                if (root is android.view.ViewGroup)
+                                    (0 until root.childCount).flatMap { views(root.getChildAt(it)) }
+                                else emptyList()
+                        val weekRows =
+                            views(activity.window.decorView).filter {
+                                it.tag?.toString()?.startsWith("week-row:") == true
+                            }
+                        check(weekRows.size >= 2) { "Week forecast rows are not identifiable" }
+                        val colors =
+                            weekRows.take(2).map {
+                                (it.background as android.graphics.drawable.ColorDrawable).color
+                            }
+                        check(colors[0] != colors[1]) {
+                            "Adjacent week forecast rows must use alternating colors"
+                        }
+                    }
                     click("Places")
                     check(
                         !has("SELECTED COORDINATES") &&
@@ -864,6 +983,21 @@ class PhoneExercise : Instrumentation() {
                         }
                     check(mapBounds.contains(play) && mapBounds.contains(scrub)) {
                         "Playback controls must overlay the map"
+                    }
+                    check(play.bottom == mapBounds.bottom && scrub.bottom == mapBounds.bottom) {
+                        "Playback controls must sit at the bottom of the map"
+                    }
+                    val attribution =
+                        Rect().apply {
+                            nodes()
+                                .first {
+                                    it.contentDescription?.toString() ==
+                                        "OpenStreetMap attribution and licence"
+                                }
+                                .getBoundsInScreen(this)
+                        }
+                    check(attribution.left == mapBounds.left && attribution.top == mapBounds.top) {
+                        "Map attribution must sit at the top left"
                     }
                     check(!has("Precipitation legend") && !has("mm/5min"))
                     runOnMainSync {

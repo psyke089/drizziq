@@ -35,7 +35,8 @@ class MainActivity : Activity() {
     private lateinit var placeTitle: TextView
     private lateinit var currentWeather: CurrentWeatherHeader
     private lateinit var coordinates: TextView
-    private lateinit var connection: TextView
+    private lateinit var forecastContainer: LinearLayout
+    private lateinit var weekHeader: LinearLayout
     private lateinit var progressLine: ProgressBar
     private var progressSubscription: Cancel? = null
     private val forecastOffsets = mutableMapOf<Page, Int>()
@@ -176,7 +177,7 @@ class MainActivity : Activity() {
         root =
             column().apply {
                 setBackgroundColor(Hud.bg)
-                setPadding(0, dp(12), 0, dp(12))
+                setPadding(0, dp(6), 0, dp(6))
             }
         if (android.os.Build.VERSION.SDK_INT >= 30) window.setDecorFitsSystemWindows(false)
         else
@@ -187,9 +188,9 @@ class MainActivity : Activity() {
         root.setOnApplyWindowInsetsListener { v, insets ->
             v.setPadding(
                 insets.systemWindowInsetLeft,
-                insets.systemWindowInsetTop + dp(12),
+                insets.systemWindowInsetTop + dp(6),
                 insets.systemWindowInsetRight,
-                insets.systemWindowInsetBottom + dp(12),
+                insets.systemWindowInsetBottom + dp(6),
             )
             insets
         }
@@ -207,8 +208,6 @@ class MainActivity : Activity() {
             wordmark,
             LinearLayout.LayoutParams(0, dp(36), 1f).apply { leftMargin = dp(10) },
         )
-        connection = label("CONNECTING", 9f, Hud.muted, true)
-        header.addView(connection)
         root.addView(header)
         progressLine =
             ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
@@ -262,11 +261,14 @@ class MainActivity : Activity() {
                 clipToPadding = false
                 setPadding(dp(20), 0, 0, 0)
             }
-        content.addView(forecastScroll, FrameLayout.LayoutParams(-1, -1))
+        forecastContainer = column()
+        weekHeader = column().apply { setPadding(dp(20), 0, dp(20), 0) }
+        forecastContainer.addView(weekHeader)
+        forecastContainer.addView(forecastScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        content.addView(forecastContainer, FrameLayout.LayoutParams(-1, -1))
         createRadar()
         placesScroll = ScrollView(this).apply { isFillViewport = true }
         content.addView(placesScroll, FrameLayout.LayoutParams(-1, -1))
-        root.space(8)
         root.addView(
             View(this).apply { setBackgroundColor(Hud.line) },
             LinearLayout.LayoutParams(-1, dp(1)),
@@ -323,6 +325,9 @@ class MainActivity : Activity() {
             }
         forecastScroll.removeAllViews()
         forecastScroll.addView(body)
+        weekHeader.removeAllViews()
+        weekHeader.visibility =
+            if (page == Page.WEEK && forecast != null) View.VISIBLE else View.GONE
         lastForecastDay = Times.day(now, place.zone)
         sunriseCard = null
         ensureSolar(place, now)
@@ -467,10 +472,22 @@ class MainActivity : Activity() {
             ForecastMetricLabel(this, metric, unit),
             LinearLayout.LayoutParams(0, dp(38), weight),
         )
-        body.addView(head)
-        for (day in days) {
-            val row = row().apply { setPadding(0, dp(14), 0, dp(14)) }
-            cell(row, Times.format(day.time, "EEE\ndd MMM", place.zone), 1.35f, Hud.cyan, 10f)
+        weekHeader.addView(head)
+        for ((index, day) in days.withIndex()) {
+            val row =
+                row().apply {
+                    tag = "week-row:$index"
+                    setPadding(0, dp(14), 0, dp(14))
+                    setBackgroundColor(if (index % 2 == 0) Hud.panel else Hud.bg)
+                }
+            row.addView(
+                WeekDayLabel(
+                    this,
+                    Times.format(day.time, "EEE", place.zone),
+                    Times.format(day.time, "dd MMM", place.zone),
+                ),
+                LinearLayout.LayoutParams(0, -2, 1.35f),
+            )
             row.addView(
                 WeatherGlyph(
                         this,
@@ -537,7 +554,7 @@ class MainActivity : Activity() {
             }
         radarPanel.addView(
             attribution,
-            FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END),
+            FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START),
         )
         val controls =
             row().apply {
@@ -566,7 +583,7 @@ class MainActivity : Activity() {
         )
         radarPanel.addView(
             controls,
-            FrameLayout.LayoutParams(-1, dp(40), Gravity.BOTTOM).apply { bottomMargin = dp(22) },
+            FrameLayout.LayoutParams(-1, dp(40), Gravity.BOTTOM),
         )
         content.addView(radarPanel, FrameLayout.LayoutParams(-1, -1))
     }
@@ -673,7 +690,7 @@ class MainActivity : Activity() {
         page = value
         radarVisible = value == Page.RADAR
         radarPanel.visibility = if (radarVisible) View.VISIBLE else View.GONE
-        forecastScroll.visibility =
+        forecastContainer.visibility =
             if (value == Page.TODAY || value == Page.WEEK) View.VISIBLE else View.GONE
         placesScroll.visibility = if (value == Page.PLACES) View.VISIBLE else View.GONE
         tabs.forEach { (destination, tab) ->
@@ -703,8 +720,6 @@ class MainActivity : Activity() {
         )
         placeCredit.visibility = if (repo.place.geocodeId == null) View.GONE else View.VISIBLE
         if (repo.place.geocodeId != null) placeCredit.text = placeCreditText(repo.place)
-        connection.text = if (repo.online) "DWD / ONLINE" else "OFFLINE"
-        connection.setTextColor(if (repo.online) Hud.cyan else Hud.amber)
         if (
             forecastVersion != repo.forecast ||
                 lastForecastPlace != repo.place ||
@@ -761,32 +776,20 @@ class MainActivity : Activity() {
         if (favourites.isEmpty())
             body.addView(label("Saved places will appear here.", 13f, Hud.muted))
         favourites.forEach { place ->
-            val card =
-                column().apply {
-                    pad(12)
-                    background = panel()
-                }
-            card.addView(label(place.label, 17f))
-            if (place.geocodeId != null) card.addView(placeCreditView(place))
-            card.space(4)
-            card.addView(label(coords(place.lat, place.lon), 10f, Hud.muted, true))
-            card.space(8)
-            val actions = row()
-            actions.addView(
-                action("SELECT", "Select favourite ${place.label}") {
-                    if (choose(place)) showPage(Page.TODAY)
-                },
-                LinearLayout.LayoutParams(0, dp(48), 1f),
+            body.addView(
+                FavouriteCard(
+                    this,
+                    place,
+                    selected = repo.place.lat == place.lat && repo.place.lon == place.lon,
+                    select = {
+                        if (choose(place)) showPage(Page.TODAY)
+                    },
+                    delete = {
+                        store.delete(place)
+                        locations()
+                    },
+                )
             )
-            actions.addView(
-                action("DELETE", "Delete favourite ${place.label}") {
-                    store.delete(place)
-                    locations()
-                },
-                LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(8) },
-            )
-            card.addView(actions)
-            body.addView(card)
             body.space(10)
         }
         body.space(12)
