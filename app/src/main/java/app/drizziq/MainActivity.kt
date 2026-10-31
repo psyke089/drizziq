@@ -459,16 +459,17 @@ class MainActivity : Activity() {
         }
         val head =
             row().apply {
-                setPadding(0, dp(12), 0, dp(12))
                 setBackgroundColor(Hud.panel)
             }
         head.addView(
-            ForecastMetricLabel(this, ForecastMetric.TIME),
-            LinearLayout.LayoutParams(0, dp(38), 1.35f),
+            ForecastMetricLabel(this, ForecastMetric.TIME).apply {
+                setBackgroundColor(Hud.legend)
+            },
+            LinearLayout.LayoutParams(0, dp(62), 1.35f),
         )
         head.addView(
             ForecastMetricLabel(this, ForecastMetric.SKY),
-            LinearLayout.LayoutParams(0, dp(38), .7f),
+            LinearLayout.LayoutParams(0, dp(62), .7f),
         )
         for ((metric, unit, weight) in
             listOf(
@@ -479,22 +480,25 @@ class MainActivity : Activity() {
                 Triple(ForecastMetric.SUN, "h", .8f),
             )) head.addView(
             ForecastMetricLabel(this, metric, unit),
-            LinearLayout.LayoutParams(0, dp(38), weight),
+            LinearLayout.LayoutParams(0, dp(62), weight),
         )
         weekHeader.addView(head)
         for ((index, day) in days.withIndex()) {
             val row =
                 row().apply {
                     tag = "week-row:$index"
-                    setPadding(0, dp(14), 0, dp(14))
                     setBackgroundColor(if (index % 2 == 0) Hud.panel else Hud.bg)
                 }
             row.addView(
                 WeekDayLabel(
-                    this,
-                    Times.format(day.time, "EEE", place.zone),
-                    Times.format(day.time, "dd MMM", place.zone),
-                ),
+                        this,
+                        Times.format(day.time, "EEE", place.zone),
+                        Times.format(day.time, "dd MMM", place.zone),
+                    )
+                    .apply {
+                        minimumHeight = dp(64)
+                        setBackgroundColor(Hud.legend)
+                    },
                 LinearLayout.LayoutParams(0, -2, 1.35f),
             )
             row.addView(
@@ -782,6 +786,10 @@ class MainActivity : Activity() {
         body.addView(label("FAVOURITES", 11f, Hud.cyan, true))
         body.space(10)
         val favourites = store.favourites()
+        if (favourites.any { it.geocodeId != null }) {
+            body.addView(placeCreditView())
+            body.space(6)
+        }
         if (favourites.isEmpty())
             body.addView(label("Saved places will appear here.", 13f, Hud.muted))
         favourites.forEach { place ->

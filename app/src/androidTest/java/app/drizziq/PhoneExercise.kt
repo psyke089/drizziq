@@ -296,8 +296,15 @@ class PhoneExercise : Instrumentation() {
                             ),
                         )
                         hourly.layout(0, 0, hourly.measuredWidth, hourly.measuredHeight)
-                        check(hourly.getChildAt(0).width == targetContext.dp(29)) {
-                            "Hourly legend must be half its former width"
+                        check(hourly.getChildAt(0).width == targetContext.dp(40)) {
+                            "Hourly legend must be wider than the old metric rail"
+                        }
+                        check(
+                            (hourly.getChildAt(0).background
+                                    as? android.graphics.drawable.ColorDrawable)
+                                ?.color == Hud.legend
+                        ) {
+                            "Hourly legend needs its own colour"
                         }
                         descendants(hourly)
                             .filterIsInstance<ForecastMetricLabel>()
@@ -389,7 +396,7 @@ class PhoneExercise : Instrumentation() {
                     }
                     result.putString(
                         "checks",
-                        "Radar tap/drag/accessibility click dispatch; compact hourly legend; week typography; favourite-card selection/delete; observed/forecast fixture decoding; themed launcher mask rendering",
+                        "Radar tap/drag/accessibility click dispatch; widened, tinted hourly legend; week typography; favourite-card selection/delete; observed/forecast fixture decoding; themed launcher mask rendering",
                     )
                 }
                 "svg-icons" -> {
@@ -977,6 +984,15 @@ class PhoneExercise : Instrumentation() {
                             }
                         check(colors[0] != colors[1]) {
                             "Adjacent week forecast rows must use alternating colors"
+                        }
+                        val legendColors =
+                            weekRows.take(2).map {
+                                ((it as android.view.ViewGroup).getChildAt(0).background
+                                        as? android.graphics.drawable.ColorDrawable)
+                                    ?.color
+                            }
+                        check(legendColors.all { it == Hud.legend }) {
+                            "Week legend column must use the hourly legend colour"
                         }
                     }
                     click("Places")

@@ -51,13 +51,17 @@ class HourlyForecast(
     init {
         orientation = HORIZONTAL
         contentDescription = "Hourly forecast, swipe horizontally for later hours"
-        val rail = context.column()
+        val rail =
+            context.column().apply {
+                tag = "hourly-legend"
+                setBackgroundColor(Hud.legend)
+            }
         horizontal.apply {
             isHorizontalScrollBarEnabled = true
             contentDescription = "Hourly forecast timeline"
             addView(track, LayoutParams(context.dp(56) * columns.size, -2))
         }
-        addView(rail, LayoutParams(context.dp(29), -2))
+        addView(rail, LayoutParams(context.dp(40), -2))
         addView(horizontal, LayoutParams(0, -2, 1f))
         fun title(metric: ForecastMetric, height: Int, unit: String = "") {
             rail.addView(

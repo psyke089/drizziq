@@ -54,7 +54,6 @@ class FavouriteCard(
 
         val content = context.column()
         content.addView(context.label(place.label, 17f))
-        if (place.geocodeId != null) content.addView(context.placeCreditView(place))
         content.space(4)
         content.addView(
             context.label(formatCoordinates(place.lat, place.lon), 10f, Hud.muted, true)

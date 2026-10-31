@@ -142,13 +142,14 @@ class PlaceChoices(
                 pad(10)
             }
         body.addView(input)
+        body.space(4)
+        body.addView(activity.placeCreditView())
         body.space(10)
         val status = activity.label(activity.getString(R.string.city_search_hint), 12f, Hud.muted)
         body.addView(status)
         body.space(10)
         val rows = activity.column()
         body.addView(rows)
-        body.addView(activity.placeCreditView())
         val d =
             AlertDialog.Builder(activity)
                 .setTitle(R.string.city_search_title)

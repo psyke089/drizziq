@@ -11,6 +11,7 @@ import kotlin.math.*
 object Hud {
     val bg = Color.rgb(8, 15, 25)
     val panel = Color.rgb(15, 26, 40)
+    val legend = Color.rgb(16, 43, 53)
     val line = Color.rgb(35, 53, 72)
     val ink = Color.rgb(232, 241, 247)
     val muted = Color.rgb(147, 167, 188)
