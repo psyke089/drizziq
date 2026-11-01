@@ -1,6 +1,6 @@
 # Local development and verification
 
-[AGENTS.md](../AGENTS.md) defines the default test-first workflow. There is no CI; run the local gate before handing changes back.
+[AGENTS.md](../AGENTS.md) defines the default test-first workflow. Run the local gate before handing changes back; the GitHub Actions mirror reproduces it but is not a substitute.
 
 ## Setup
 
@@ -34,7 +34,7 @@ Kotlin/Gradle files use ktfmt's Kotlin style. `.editorconfig` supplies basic edi
 
 Android lint treats warnings as errors and runs without a baseline. Fix findings rather than introducing a baseline or disabling checks globally. Narrow source suppressions document cases where a check does not apply, such as Kotlin-only view constructors and radar clicks dispatched through `GestureDetector`. The gate does not include detekt, ktlint, screenshot testing, managed emulators, or a release-signing check.
 
-Reports are generated under `app/build/reports/` (JVM tests and lint), with JUnit XML under `app/build/test-results/`. APKs are under `app/build/outputs/apk/`. These generated directories are ignored by Git. Release builds are unsigned and are not intended for installation over the debug app.
+Reports are generated under `app/build/reports/` (JVM tests and lint), with JUnit XML under `app/build/test-results/`. APKs are under `app/build/outputs/apk/`. These generated directories are ignored by Git. Release builds are unsigned and are not installation artifacts; published APKs are debug builds signed with the public release key described below.
 
 ## Icon artwork
 
@@ -74,6 +74,30 @@ Smoke checks do not change connectivity, favourites or the selected place. They 
 
 Phone logs go to ignored `tmp/verification/` by default (`--reports PATH` overrides it). Full integration also captures the offline screen. The runner reopens Drizziq after successful completion because instrumentation may return to the launcher. Before manual taps, verify the foreground package and current bounds. Keep visual checks brief; do not repeatedly capture screens to assess small aesthetic details.
 
+## GitHub mirror and releases
+
+Codeberg is the source of truth. A Forgejo push mirror maintains a public `psyke089/drizziq`
+copy on GitHub, where `.github/workflows/ci.yml` runs:
+
+- every push to `main` runs `./tools/verify`, the same gate as a local checkout without a phone;
+- every `v*` tag, or a manual `workflow_dispatch`, additionally checks that the tag matches
+  `versionName`, that the built APK reports that version and the public release signature, then
+  publishes `drizziq-<version>.apk` and its `.sha256` as release assets.
+
+GitHub is force-pushed and pruned by the mirror. Never commit, branch or tag there by hand; keep
+every workflow file in Codeberg. `tools/install-android-sdk.sh` installs the platform and build
+tools the workflow needs, and is usable on a fresh machine.
+
+Published APKs keep the signing identity of the earlier Codeberg releases: the key at
+`~/.android/debug.keystore`, stored in the `DRIZZIQ_KEYSTORE_B64` repository secret. The workflow
+fails rather than publishing a build signed with a runner-generated key, because that breaks
+updates with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`. Rotating the key is a deliberate user-facing
+break, not a routine change. The mirror itself needs a fine-grained token with Contents and
+Workflows write access, kept in Codeberg's mirror settings and never in the repository.
+
+Push `main` and a release tag separately. A tag that arrives in the same atomic mirror push as
+`main` can skip its release run; recover with `gh workflow run ci.yml --ref v<version>`.
+
 ## Release screenshots
 
 For every release with UI changes, capture fresh raw screenshots from the matching
@@ -89,4 +113,4 @@ require repeating the app test suite.
 
 ## Growing the suite
 
-Add tests alongside behavior changes rather than setting arbitrary coverage targets. Prioritize boundaries and failure paths in repository/cache policies, request ordering, missing DWD fields and local-day calculations. Use device tests for Activity recreation, navigation state, persistence and actual gestures. Keep live-service integration separate from fast deterministic checks. CI can later invoke the same local gate without changing its definition.
+Add tests alongside behavior changes rather than setting arbitrary coverage targets. Prioritize boundaries and failure paths in repository/cache policies, request ordering, missing DWD fields and local-day calculations. Use device tests for Activity recreation, navigation state, persistence and actual gestures. Keep live-service integration separate from fast deterministic checks. The GitHub workflow invokes the same local gate, so new checks are picked up without changing its definition.

@@ -6,7 +6,7 @@
 - Use JDK 21, Android SDK platform 37 and Build Tools 36.0.0. Use the checked-in Gradle wrapper. `local.properties` or `ANDROID_HOME` supplies the SDK path.
 - This workstation has JDK 21 at `/usr/lib/jvm/java-21-openjdk` and SDK at `/home/psyke/Android/Sdk`. Keep machine-specific paths out of tracked build configuration.
 - `tools/verify` supplies local environment defaults; caller-provided environment variables take precedence. `--offline` requires dependencies to have been downloaded previously. Report missing dependencies separately from test failures.
-- There is no CI. Local verification is the required gate; do not assume a remote pipeline will catch failures.
+- GitHub Actions mirrors every push to `main` and every `v*` tag through the Codeberg push mirror; the workflow runs `./tools/verify` and publishes release APKs. Local verification remains the required gate, so do not rely on the remote run to catch failures. See `docs/DEVELOPMENT.md` for the mirror, tag and signing rules.
 
 ## Product design, assets and data
 
