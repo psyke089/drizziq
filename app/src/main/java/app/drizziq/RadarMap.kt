@@ -42,6 +42,10 @@ class RadarMap(context: Context) : View(context) {
     internal val overlaySelection
         get() = overlays.selection
 
+    /** True while the layer menu holds a cloud or temperature layer instead of precipitation. */
+    internal val overlayRequested: Boolean
+        get() = overlays.layer != null
+
     internal fun overlay(layer: Overlay?, time: Long, online: Boolean) {
         overlays.set(layer, time, online)
     }
@@ -385,7 +389,8 @@ class RadarMap(context: Context) : View(context) {
         overlays.draw(c, x, y, zoom, width, height)
         val f = frame
         val image = bitmap
-        if (f != null && image != null) {
+        // The layer menu picks exactly one product; clouds and temperature replace precipitation.
+        if (f != null && image != null && !overlayRequested) {
             val world = world()
             for (index in geographicMesh.indices step 2) {
                 val delta = ((geographicMesh[index] - x + .5 + 1) % 1) - .5

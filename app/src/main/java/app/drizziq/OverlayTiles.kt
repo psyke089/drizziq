@@ -54,6 +54,10 @@ internal class OverlayTiles(private val context: Context, private val changed: (
     var selection: OverlaySelection? = null
         private set
 
+    /** Layer the user asked for, even before its first tile resolves. */
+    val layer: Overlay?
+        get() = selected
+
     private val capFile = File(root, "capabilities.xml")
 
     init {
