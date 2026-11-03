@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <WMS_Capabilities xmlns="http://www.opengis.net/wms" version="1.3.0"><Capability><Layer>
-<Layer><Name>Icon-eu_reg00625_fd_gl_T</Name><Dimension name="time">2026-11-03T00:00:00Z/2026-11-03T12:00:00Z/PT1H</Dimension><Dimension name="reference_time">2026-11-03T00:00:00Z,2026-11-03T06:00:00Z</Dimension><Dimension name="elevation">2.0</Dimension></Layer>
+<Layer><Name>Icon_reg025_fd_sl_T2M</Name><Dimension name="time">2026-11-03T00:00:00Z/2026-11-03T14:00:00Z/PT1H</Dimension></Layer>
 <Layer><Name>Satellite_worldmosaic_3km_world_ir108_3h</Name><Dimension name="time">2026-11-03T00:00:00Z/2026-11-03T09:00:00Z/PT3H</Dimension></Layer>
 </Layer></Capability></WMS_Capabilities>

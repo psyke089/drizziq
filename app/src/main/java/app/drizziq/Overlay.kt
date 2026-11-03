@@ -13,23 +13,33 @@ internal enum class Overlay(
     val cadence: Long,
     val maxZoom: Int,
     val alpha: Int,
+    val ttl: Long,
 ) {
-    TEMPERATURE("Icon-eu_reg00625_fd_gl_T", "", 3600000L, 5, 120),
+    TEMPERATURE("Icon_reg025_fd_sl_T2M", "", 3600000L, 5, 120, 2 * 3600000L),
     CLOUDS(
         "Satellite_worldmosaic_3km_world_ir108_3h",
         "satellite_worldmosaic_3km_world_ir108_3h",
         10800000L,
         7,
         110,
+        6 * 3600000L,
     ),
 }
 
-internal data class OverlaySelection(val overlay: Overlay, val time: Long, val run: Long?)
+internal data class OverlaySelection(val overlay: Overlay, val time: Long)
 
-internal data class OverlayAvailability(val times: List<Long>, val runs: List<Long>)
+internal data class OverlayAvailability(val times: List<Long>)
 
 internal object OverlayModel {
     private const val WORLD = 20037508.342789244
+    private val TIME_FORMAT =
+        java.time.format.DateTimeFormatter.ofPattern(
+                "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+                java.util.Locale.US,
+            )
+            .withZone(java.time.ZoneOffset.UTC)
+
+    private fun iso(time: Long) = TIME_FORMAT.format(Instant.ofEpochMilli(time))
 
     fun bounds(z: Int, x: Int, y: Int): DoubleArray {
         require(z in 0..22 && x in 0 until (1 shl z) && y in 0 until (1 shl z))
@@ -80,6 +90,8 @@ internal object OverlayModel {
         }
         reader.contentHandler =
             object : DefaultHandler() {
+                private val path = mutableListOf<String>()
+
                 override fun startElement(
                     uri: String?,
                     local: String,
@@ -88,8 +100,9 @@ internal object OverlayModel {
                 ) {
                     text.setLength(0)
                     if (local == "Layer") stack.add(mutableMapOf())
-                    if (local == "Dimension")
+                    if (local == "Dimension" && path.lastOrNull() == "Layer")
                         dimension = attrs.getValue("name")?.lowercase(java.util.Locale.US).orEmpty()
+                    path.add(local)
                 }
 
                 override fun characters(ch: CharArray, start: Int, length: Int) {
@@ -98,18 +111,22 @@ internal object OverlayModel {
                 }
 
                 override fun endElement(uri: String?, local: String, q: String?) {
-                    if (stack.isEmpty()) return
+                    if (path.isNotEmpty()) path.removeAt(path.lastIndex)
+                    if (stack.isEmpty()) {
+                        text.setLength(0)
+                        return
+                    }
                     val layer = stack.last()
-                    if (local == "Name") layer["name"] = text.toString().trim()
-                    if (local == "Dimension") layer[dimension] = text.toString().trim()
+                    val parent = path.lastOrNull()
+                    if (local == "Name" && parent == "Layer") layer["name"] = text.toString().trim()
+                    if (local == "Dimension" && parent == "Layer")
+                        layer[dimension] = text.toString().trim()
                     if (local == "Layer") {
                         val overlay = Overlay.entries.firstOrNull { it.layer == layer["name"] }
                         if (overlay != null)
                             result[overlay] =
                                 OverlayAvailability(
-                                    instants(requireNotNull(layer["time"])).sorted(),
-                                    layer["reference_time"]?.let(::instants)?.sorted()
-                                        ?: emptyList(),
+                                    instants(requireNotNull(layer["time"])).sorted()
                                 )
                         stack.removeAt(stack.lastIndex)
                     }
@@ -122,13 +139,33 @@ internal object OverlayModel {
         return result
     }
 
+    /** Recent slot times, newest first, for resolving around stale advertised windows. */
+    fun candidates(overlay: Overlay, now: Long): List<Long> {
+        require(now > 0)
+        val limit = if (overlay == Overlay.CLOUDS) 16 else 24
+        val latest = now / overlay.cadence * overlay.cadence
+        return (0 until limit).map { latest - it * overlay.cadence }
+    }
+
+    /** DWD answers an unavailable time with a dimension or coverage error. */
+    fun timeUnavailable(message: String?): Boolean {
+        if (message == null) return false
+        val lower = message.lowercase(java.util.Locale.US)
+        return "invalid dimension value" in lower ||
+            "could not find a match for 'time'" in lower ||
+            "no data available" in lower ||
+            "could not read coverage data" in lower
+    }
+
     fun select(
         overlay: Overlay,
         target: Long,
         now: Long,
         caps: Map<Overlay, OverlayAvailability>,
+        resolved: Long? = null,
     ): OverlaySelection? {
         val available = caps[overlay] ?: return null
+        if (resolved != null) return OverlaySelection(overlay, resolved)
         val limit = if (overlay == Overlay.CLOUDS) now else target
         if (
             available.times.isEmpty() ||
@@ -137,15 +174,11 @@ internal object OverlayModel {
         )
             return null
         val time = available.times.lastOrNull { it <= limit } ?: return null
-        val run =
-            if (overlay == Overlay.TEMPERATURE)
-                available.runs.lastOrNull { it <= time } ?: return null
-            else null
-        return OverlaySelection(overlay, time, run)
+        return OverlaySelection(overlay, time)
     }
 
     fun key(selection: OverlaySelection, z: Int, x: Int, y: Int) =
-        "${selection.overlay.name}-${selection.time}-${selection.run ?: 0}-$z-$x-$y"
+        "${selection.overlay.name}-${selection.overlay.layer}-${selection.time}-$z-$x-$y"
 
     fun url(selection: OverlaySelection, z: Int, x: Int, y: Int): String {
         val bounds = bounds(z, x, y)
@@ -162,11 +195,8 @@ internal object OverlayModel {
                 "HEIGHT" to "256",
                 "FORMAT" to "image/png",
                 "TRANSPARENT" to "true",
-                "TIME" to Instant.ofEpochMilli(selection.time).toString(),
+                "TIME" to iso(selection.time),
             )
-        if (selection.run != null)
-            values["REFERENCE_TIME"] = Instant.ofEpochMilli(selection.run).toString()
-        if (selection.overlay == Overlay.TEMPERATURE) values["ELEVATION"] = "2.0"
         return "https://maps.dwd.de/geoserver/dwd/wms?" +
             values.entries.joinToString("&") {
                 "${it.key}=${URLEncoder.encode(it.value, "UTF-8")}"
@@ -183,6 +213,11 @@ internal object OverlayModel {
             ?.groupValues
             ?.get(1)
             ?.replace(Regex("<[^>]*>"), "")
+            ?.replace("&apos;", "'")
+            ?.replace("&quot;", "\"")
+            ?.replace("&lt;", "<")
+            ?.replace("&gt;", ">")
+            ?.replace("&amp;", "&")
             ?.trim()
             ?.take(300)
     }

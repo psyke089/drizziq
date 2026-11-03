@@ -368,13 +368,13 @@ class PhoneExercise : Instrumentation() {
                     click("Radar layers")
                     click("Temperature")
                     waitFor("temperature layer") {
-                        has("2 m TEMP") && has("Source: Deutscher Wetterdienst")
+                        has("2 m TEMP") && !has("Source: Deutscher Wetterdienst")
                     }
                     click("Radar layers")
                     click("Clouds")
                     waitFor("cloud layer") { has("CLOUDS") && has("IR 10.8") }
                     click("Radar layers")
-                    click("Precipitation only")
+                    click("Precipitation")
                     waitFor("overlay removed") { !has("IR 10.8") }
                     result.putString(
                         "checks",
@@ -2222,7 +2222,7 @@ class PhoneExercise : Instrumentation() {
                     check(
                         radarMapNode().performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
                     )
-                    check(viewport() != centered)
+                    waitFor("accessible zoom out") { viewport() != centered }
                     check(radarMapNode().performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD))
                     val bar = nodes().first { it.className == "android.widget.SeekBar" }
                     val r = Rect()

@@ -78,7 +78,7 @@ internal object PhoneFixtures {
                 url.host == "maps.dwd.de" && url.query.contains("GetCapabilities", true) -> {
                     bytes =
                         """<WMS_Capabilities xmlns="http://www.opengis.net/wms"><Capability><Layer>
-                    <Layer><Name>Icon-eu_reg00625_fd_gl_T</Name><Dimension name="time">2026-10-22T00:00:00Z/2026-10-23T12:00:00Z/PT1H</Dimension><Dimension name="reference_time">2026-10-22T12:00:00Z,2026-10-22T18:00:00Z</Dimension></Layer>
+                    <Layer><Name>Icon_reg025_fd_sl_T2M</Name><Dimension name="time">2026-10-22T00:00:00Z/2026-10-23T12:00:00Z/PT1H</Dimension></Layer>
                     <Layer><Name>Satellite_worldmosaic_3km_world_ir108_3h</Name><Dimension name="time">2026-10-22T00:00:00Z/2026-10-22T18:00:00Z/PT3H</Dimension></Layer>
                     </Layer></Capability></WMS_Capabilities>"""
                             .toByteArray()

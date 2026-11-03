@@ -43,6 +43,11 @@ internal class OverlayTiles(private val context: Context, private val changed: (
     private var selected: Overlay? = null
     private var target = 0L
     private var online = true
+    private val resolved = mutableMapOf<Overlay, Long>()
+    private val resolveBackoff = mutableMapOf<Overlay, Long>()
+    private val unavailable = mutableMapOf<Overlay, String>()
+    private var resolving = false
+    private var rendered = 0
     var notice: String? = null
         private set
 
@@ -53,7 +58,9 @@ internal class OverlayTiles(private val context: Context, private val changed: (
 
     init {
         workers.execute {
-            stores.values.forEach { it.prune() }
+            stores.forEach { (overlay, store) ->
+                store.prune { file, now -> now - file.lastModified() > overlay.ttl }
+            }
             if (capFile.isFile)
                 runCatching { OverlayModel.capabilities(capFile.readBytes()) }
                     .getOrNull()
@@ -88,22 +95,28 @@ internal class OverlayTiles(private val context: Context, private val changed: (
             return
         }
         val previous = selection
+        resolved[overlay]?.let {
+            if (AppPlatform.now() - it > 30 * 60_000L) resolved.remove(overlay)
+        }
         selection = capabilities?.let {
-            OverlayModel.select(overlay, target, AppPlatform.now(), it)
+            OverlayModel.select(overlay, target, AppPlatform.now(), it, resolved[overlay])
         }
         if (previous != selection) {
             generation++
             waiting.clear()
+            rendered = 0
         }
         notice =
             when {
                 capabilities == null && !online -> "Overlay offline"
                 capabilities == null -> "${overlay.name} · loading…"
-                selection == null -> "No overlay for this time"
+                resolving -> "${overlay.name} · checking latest…"
+                selection == null -> unavailable[overlay] ?: "No overlay for this time"
                 !online -> "Cached overlay"
                 else -> null
             }
         changed()
+        if (online && capabilities != null && selection == null) resolve(overlay)
         if (
             online &&
                 !loadingCapabilities &&
@@ -138,6 +151,49 @@ internal class OverlayTiles(private val context: Context, private val changed: (
                 }
             }
         }
+    }
+
+    /** DWD sometimes advertises timestamps it no longer serves; probe recent slots once. */
+    private fun resolve(overlay: Overlay): Boolean {
+        if (resolving || disposed || !online) return false
+        val now = AppPlatform.now()
+        if ((resolveBackoff[overlay] ?: 0L) > now) return false
+        resolving = true
+        notice = "${overlay.name} · checking latest…"
+        changed()
+        workers.execute {
+            var found: OverlaySelection? = null
+            for (time in OverlayModel.candidates(overlay, AppPlatform.now())) {
+                if (disposed) break
+                found =
+                    runCatching {
+                        val probe = OverlaySelection(overlay, time)
+                        val bytes = Http.bytes(OverlayModel.url(probe, 5, 17, 10), 2 * 1024 * 1024)
+                        if (OverlayModel.serviceError(bytes) != null) return@runCatching null
+                        require(Png.dimensions(bytes) == (256 to 256))
+                        probe
+                    }
+                        .getOrNull()
+                if (found != null) break
+            }
+            val result = found
+            handler.post {
+                if (disposed) return@post
+                resolving = false
+                if (result != null) {
+                    resolved[overlay] = result.time
+                    resolveBackoff.remove(overlay)
+                    unavailable.remove(overlay)
+                    notice = null
+                } else {
+                    resolveBackoff[overlay] = AppPlatform.now() + 600_000L
+                    unavailable[overlay] = "Overlay unavailable · DWD has no current data"
+                    notice = unavailable[overlay]
+                }
+                update()
+            }
+        }
+        return true
     }
 
     fun draw(
@@ -179,6 +235,30 @@ internal class OverlayTiles(private val context: Context, private val changed: (
         paint.alpha = 255
     }
 
+    /** DWD nodes disagree on available buckets, so retry time-specific rejections. */
+    private fun download(active: OverlaySelection, z: Int, x: Int, y: Int): ByteArray {
+        val url = OverlayModel.url(active, z, x, y)
+        var attempt = 0
+        while (true) {
+            try {
+                val bytes = Http.bytes(url, 2 * 1024 * 1024)
+                val message = OverlayModel.serviceError(bytes)
+                if (message == null) return bytes
+                if (attempt >= 2 || !OverlayModel.timeUnavailable(message)) error(message)
+            } catch (e: java.io.IOException) {
+                if (attempt >= 1) throw e
+            }
+            attempt++
+            Thread.sleep(300L * attempt)
+        }
+    }
+
+    private fun errorSummary(error: String): String =
+        when {
+            error.contains("ssl", true) || error.contains("decrypt", true) -> "connection problem"
+            else -> error.lineSequence().first().take(120)
+        }
+
     private fun request(active: OverlaySelection, key: String, z: Int, x: Int, y: Int) {
         if (disposed || key in waiting || failed[key]?.let { AppPlatform.now() < it } == true)
             return
@@ -202,17 +282,18 @@ internal class OverlayTiles(private val context: Context, private val changed: (
                         wasCached = true
                     }
                 }
-                val ttl = if (active.overlay == Overlay.CLOUDS) 6 * 3600000L else 2 * 3600000L
+                val ttl = active.overlay.ttl
                 if (online && (result == null || AppPlatform.now() - file.lastModified() > ttl)) {
-                    val bytes = Http.bytes(OverlayModel.url(active, z, x, y), 2 * 1024 * 1024)
-                    OverlayModel.serviceError(bytes)?.let { error(it) }
+                    val bytes = download(active, z, x, y)
                     require(Png.dimensions(bytes) == (256 to 256)) { "Invalid overlay image" }
                     val image =
                         BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                             ?: error("Invalid overlay image")
                     runCatching {
                         AtomicFiles.write(file, bytes)
-                        store.wrote(file)
+                        store.wrote(file) { candidate, now ->
+                            now - candidate.lastModified() > active.overlay.ttl
+                        }
                     }
                     result = image
                     wasCached = false
@@ -222,20 +303,28 @@ internal class OverlayTiles(private val context: Context, private val changed: (
             }
             val bitmap = result
             handler.post {
-                if (!disposed && token == generation && selection == active) {
+                if (disposed) return@post
+                val staleTime = bitmap == null && OverlayModel.timeUnavailable(error)
+                if (token == generation && selection == active) {
                     waiting.remove(key)
                     if (bitmap != null) memory.put(key, bitmap)
                     else failed[key] = AppPlatform.now() + if (error != null) 300000 else 60000
                     notice =
                         when {
+                            staleTime -> "${active.overlay.name} · checking latest…"
                             bitmap != null && (!online || wasCached && error != null) ->
                                 "Cached overlay"
                             bitmap == null && !online -> "Overlay offline"
-                            error != null -> "Overlay unavailable · $error"
+                            error != null -> "Overlay unavailable · ${errorSummary(error)}"
                             else -> null
                         }
                     changed()
                 }
+                if (staleTime && selection == active && !resolve(active.overlay))
+                    notice =
+                        unavailable[active.overlay]
+                            ?: "Overlay unavailable · DWD has no current data"
+                else if (staleTime) changed()
             }
         }
     }

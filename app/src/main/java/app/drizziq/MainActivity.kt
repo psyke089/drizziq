@@ -60,7 +60,6 @@ class MainActivity : Activity() {
     private lateinit var playButton: ImageButton
     private lateinit var radarTime: TextView
     private lateinit var overlayInfo: TextView
-    private lateinit var overlayCredit: TextView
     private var selectedOverlay: Overlay? = null
     private var layerMenu: PopupWindow? = null
     private val handler = Handler(Looper.getMainLooper())
@@ -670,31 +669,13 @@ class MainActivity : Activity() {
         overlayInfo =
             label("", 10f, Hud.ink, true).apply {
                 setPadding(dp(6), dp(4), dp(6), dp(4))
-                setBackgroundColor(0xcf080f19.toInt())
                 visibility = View.GONE
             }
         radarPanel.addView(
             overlayInfo,
             FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply {
-                topMargin = dp(50)
+                topMargin = dp(8)
                 rightMargin = dp(8)
-            },
-        )
-        overlayCredit =
-            label("Source: Deutscher Wetterdienst", 9f, Hud.muted).apply {
-                setPadding(dp(6), dp(4), dp(6), dp(4))
-                setBackgroundColor(0xcf080f19.toInt())
-                visibility = View.GONE
-                setOnClickListener {
-                    startActivity(
-                        Intent(Intent.ACTION_VIEW, Uri.parse("https://www.dwd.de/copyright"))
-                    )
-                }
-            }
-        radarPanel.addView(
-            overlayCredit,
-            FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply {
-                topMargin = dp(24)
             },
         )
         val layers =
@@ -725,28 +706,18 @@ class MainActivity : Activity() {
 
     private fun showLayers(anchor: View) {
         layerMenu?.dismiss()
-        val menu =
-            column().apply {
-                setPadding(dp(12), dp(8), dp(12), dp(8))
-                background = panel()
-            }
-        val popup =
-            PopupWindow(menu, dp(220), -2, true).apply {
-                isOutsideTouchable = true
-                setBackgroundDrawable(
-                    android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
-                )
-                elevation = dp(8).toFloat()
-            }
-        for ((index, pair) in
+        val menu = column()
+        val rows = mutableListOf<View>()
+        lateinit var popup: PopupWindow
+        for ((index, entry) in
             listOf(
-                    null to "Precipitation only",
-                    Overlay.CLOUDS to "Clouds",
-                    Overlay.TEMPERATURE to "Temperature",
+                    Triple(null as Overlay?, "Precipitation", "metric-rain"),
+                    Triple(Overlay.CLOUDS, "Clouds", "metric-sky"),
+                    Triple(Overlay.TEMPERATURE, "Temperature", "metric-temperature"),
                 )
                 .withIndex()) {
             if (index > 0) menu.space(8)
-            val (overlay, name) = pair
+            val (overlay, name, icon) = entry
             val row =
                 row().apply {
                     minimumHeight = dp(48)
@@ -757,7 +728,7 @@ class MainActivity : Activity() {
                     isClickable = true
                     isFocusable = true
                     addView(
-                        SvgIcon(this@MainActivity, "layers").apply {
+                        SvgIcon(this@MainActivity, icon).apply {
                             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                         },
                         LinearLayout.LayoutParams(dp(20), dp(20)).apply { rightMargin = dp(8) },
@@ -771,10 +742,31 @@ class MainActivity : Activity() {
                     }
                 }
             menu.addView(row, LinearLayout.LayoutParams(-1, dp(48)))
+            rows += row
         }
+        val width = rows.maxOf {
+            it.measure(
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            )
+            it.measuredWidth
+        }
+        menu.measure(
+            View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+        )
+        val height = menu.measuredHeight
+        popup =
+            PopupWindow(menu, width, height, true).apply {
+                isOutsideTouchable = true
+                setBackgroundDrawable(
+                    android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
+                )
+                elevation = dp(8).toFloat()
+            }
         layerMenu = popup
         popup.setOnDismissListener { if (layerMenu === popup) layerMenu = null }
-        popup.showAsDropDown(anchor, dp(48) - dp(220), -dp(48 + 3 * 48 + 2 * 8 + 16))
+        popup.showAsDropDown(anchor, anchor.width - width, -(anchor.height + height + dp(16)))
     }
 
     private fun updateOverlayInfo() {
@@ -782,7 +774,6 @@ class MainActivity : Activity() {
         val selected = selectedOverlay
         val active = map.overlaySelection
         overlayInfo.visibility = if (selected == null) View.GONE else View.VISIBLE
-        overlayCredit.visibility = overlayInfo.visibility
         if (selected != null) {
             val product =
                 if (selected == Overlay.CLOUDS) "CLOUDS · IR 10.8 µm · 3h" else "2 m TEMP · °C"
@@ -794,9 +785,6 @@ class MainActivity : Activity() {
                     valid,
                     map.overlayNotice?.let { " · $it" } ?: "",
                 )
-            overlayCredit.text =
-                if (selected == Overlay.CLOUDS) "Source: Deutscher Wetterdienst · EUMETSAT/NOAA"
-                else "Source: Deutscher Wetterdienst"
         }
     }
 
