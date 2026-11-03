@@ -6,7 +6,8 @@
 - Use JDK 21, Android SDK platform 37 and Build Tools 36.0.0. Use the checked-in Gradle wrapper. `local.properties` or `ANDROID_HOME` supplies the SDK path.
 - This workstation has JDK 21 at `/usr/lib/jvm/java-21-openjdk` and SDK at `/home/psyke/Android/Sdk`. Keep machine-specific paths out of tracked build configuration.
 - `tools/verify` supplies local environment defaults; caller-provided environment variables take precedence. `--offline` requires dependencies to have been downloaded previously. Report missing dependencies separately from test failures.
-- GitHub Actions mirrors every push to `main` and every `v*` tag through the Codeberg push mirror; the workflow runs `./tools/verify` and publishes release APKs. Local verification remains the required gate, so do not rely on the remote run to catch failures. See `docs/DEVELOPMENT.md` for the mirror, tag and signing rules.
+- This is a personal, single-developer project, not an app-store product. Prefer working behavior and low maintenance over process completeness; the checks below are sized accordingly.
+- GitHub Actions mirrors every push to `main` and every `v*` tag through the Codeberg push mirror; the workflow runs `./tools/verify` and publishes release APKs. The remote run is a backstop; run the release gate locally before tagging. See `docs/DEVELOPMENT.md` for the mirror, tag and signing rules.
 
 ## Product design, assets and data
 
@@ -15,19 +16,20 @@
 - Generate visual assets locally or use assets explicitly supplied by the user. Icon artwork belongs in `artwork/icons/` as editable SVG, the source of truth for generated Android vectors. Builds run `tools/generate_icons.py`; edit SVGs rather than the generated XML or `IconAssets.kt`. Keep icon shapes out of Canvas code; runtime code may position, tint and rotate the compiled vectors. Dynamic charts/maps still use Canvas. See `artwork/icons/README.md` for supported SVG features and intensity conventions. Do not hunt for icons online or download icon packs/stock assets.
 - App data sources must be free and publicly available. Any source requiring an account or API key needs explicit user approval before integration, even if it has a free tier. Do not add an account/API-key requirement or obtain credentials implicitly.
 
-## Test-first workflow (default for every behavior change)
+## Testing and verification
 
-1. Write or extend the smallest meaningful test of the requested behavior before changing production code. For bugs, reproduce the failure with a regression test.
-2. Run that test and observe the expected failure. A compilation/dependency/environment failure does not prove a behavioral regression. For a new API, confirm the missing API failure, then make it compile and observe the failed assertion before implementing the behavior.
-3. Implement the smallest change that makes the test pass, then refactor while keeping tests green. Proceed through these steps autonomously; do not wait for separate implementation permission unless the user explicitly asks for tests only.
-4. Run the focused tests while iterating, then the complete local verification command once the change is ready. Run affected phone checks for UI/lifecycle behavior.
-5. Report what changed, the red/green evidence, the checks run, and any checks that remain blocked. Keep visual verification brief; the user can assess appearance at a glance.
+- Pure logic (parsing, selection, cache policy, time handling): write or extend the smallest focused JVM test first when practical, observe it fail, then implement. A one-line fix may take its focused test immediately after the change instead.
+- UI, layout, copy, SVG and style changes: do not invent tests. Run the app and check the changed screen. Update device assertions only when the UI contract actually changed (for example a renamed button).
+- While iterating, run only the affected tests: one JVM class, one phone phase, or a formatter. Do not run the full gate after every edit.
+- Before a release or tag: run `./tools/verify`, then the phone phases that match the release surface. Run `--full` only when connectivity, offline behavior or persistence changed, or when asked.
+- Docs, formatting and changes that cannot affect runtime need no tests and no gate.
+- Report the checks you actually ran in one or two lines, with any failure. Skip red/green narration unless the test is non-obvious.
 
-Documentation and formatting-only changes do not need artificial behavior tests. Test verification scripts through their command behavior with fake subprocesses; never toggle a real phone's radios to test the runner itself.
+Test verification scripts through their command behavior with fake subprocesses; never toggle a real phone's radios to test the runner itself.
 
 ## Commands
 
-- Full local gate (formatting, Python tooling tests, JVM tests, Android lint, debug/release APKs and device-test APK): `./tools/verify`
+- Release gate (formatting, Python tooling tests, JVM tests, Android lint, debug/release APKs and device-test APK): `./tools/verify`
 - Cached dependencies only: `./tools/verify --offline`
 - Focused JVM test: `./tools/verify --gradle-only testDebugUnitTest --tests 'app.drizziq.ReadingPolicyTest'`
 - Formatting check / apply: `./tools/verify --gradle-only formatCheck` / `./tools/verify --gradle-only formatKotlin`
@@ -43,12 +45,12 @@ Android lint and ktfmt are the configured analysis/formatting tools. Detekt, ktl
 ## Test quality and scope
 
 - JVM tests use JUnit 4 in `app/src/test`; device checks use `PhoneExercise` in `app/src/androidTest`. Keep tests in the same package as the code under test. Python tooling tests use the standard library's `unittest` in `tools/tests`.
-- Prefer names like `functionName_condition_expectedResult` for new tests. Keep existing tests intact unless their behavior/contract actually changed.
-- Never delete, skip, weaken assertions, or introduce a lint baseline just to turn a failure green. If an existing test appears wrong, explain the discrepancy before changing its contract. Necessary selector changes for an authorized UI change must preserve the original assertions.
-- Unit tests must use fixed timestamps, checked-in fixtures and fakes for clocks, networking and storage; no live requests or real sleeps. Device integration tests may poll with a deadline and use gesture pacing.
-- Assert observable behavior, including boundaries and failure paths; avoid tests that simply mirror the implementation. Cover stale/cache handling, failed refresh retention, obsolete requests, missing data, time zones and lifecycle state when changing those behaviors.
+- Prefer names like `functionName_condition_expectedResult`. Keep existing tests intact unless their behavior/contract actually changed.
+- Never delete, skip, weaken assertions, or introduce a lint baseline just to turn a failure green. If an existing test appears wrong, explain the discrepancy before changing its contract.
+- Assert observable behavior and edge cases that have bitten before (boundaries, stale/cache handling, failed refresh retention, missing data, time zones, lifecycle). Skip tests that pin constants, wiring or incidentals.
+- Unit tests use fixed timestamps, checked-in fixtures and fakes; no live requests or real sleeps. Device tests may poll with a deadline and use gesture pacing.
 - Android framework calls in JVM tests should fail rather than silently return defaults. Keep pure rules independent of Android.
-- Do not force an unrelated architecture migration or add runtime dependencies for test convenience. Test tooling needed for this workflow is in scope; future additions should have a specific benefit.
+- No coverage targets. Add tests where the risk is real; do not add architecture or test tooling for its own sake.
 
 ## Phone and completion rules
 
@@ -57,4 +59,5 @@ Android lint and ktfmt are the configured analysis/formatting tools. Detekt, ktl
 - Debug builds use the standard `~/.android/debug.keystore`, the same key as published APKs, so local and released builds share one signing identity. Set `ANDROID_USER_HOME` only to override it. Do not commit keys or passwords.
 - Quick checks must not modify connectivity or favourites. Full integration is an explicit opt-in; restore connectivity even on failure and attempt every restoration action.
 - Verify the foreground package and current UI bounds before coordinate taps. Instrumentation can exit to the launcher after finishing. Prefer semantic accessibility selectors over coordinates.
-- Done means relevant test-first evidence, a green local gate, affected device checks where available, and no unintended changes. Android lint runs without a baseline; warnings fail the gate. A missing SDK, dependency or phone is a reported verification limitation, never a passing check.
+- Done means the change works in the app, the tests for touched behavior pass, and nothing unrelated changed. Android lint runs without a baseline and stays strict.
+- Run the full gate and affected phone checks when releasing, not for every change. A missing phone blocks release checks only; state it plainly instead of claiming a pass.
