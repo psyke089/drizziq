@@ -24,9 +24,6 @@ def main():
     jdk = Path("/usr/lib/jvm/java-21-openjdk")
     if "JAVA_HOME" not in environment and jdk.is_dir():
         environment["JAVA_HOME"] = str(jdk)
-    android = ROOT / "tmp/android"
-    if "ANDROID_USER_HOME" not in environment and (android / "debug.keystore").exists():
-        environment["ANDROID_USER_HOME"] = str(android)
     if not shutil.which("java", path=environment.get("PATH")) and "JAVA_HOME" not in environment:
         raise SystemExit("JDK 21 is required; set JAVA_HOME.")
     if not focused:

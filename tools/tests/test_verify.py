@@ -50,11 +50,11 @@ class VerificationCommandTest(unittest.TestCase):
         for key, value in environment.items():
             self.assertEqual(value, calls[0].kwargs["env"][key])
 
-    def test_workstation_defaults_select_jdk21_and_existing_project_debug_key(self):
+    def test_workstation_defaults_select_jdk21_and_standard_android_user_home(self):
         with patch.object(verify.Path, "is_dir", return_value=True), patch.object(verify.Path, "exists", return_value=True):
             _, calls = self.invoke(["--gradle-only", "tasks"])
         self.assertEqual("/usr/lib/jvm/java-21-openjdk", calls[0].kwargs["env"]["JAVA_HOME"])
-        self.assertEqual(str(verify.ROOT / "tmp/android"), calls[0].kwargs["env"]["ANDROID_USER_HOME"])
+        self.assertNotIn("ANDROID_USER_HOME", calls[0].kwargs["env"])
 
     def test_focused_invocation_without_task_fails_before_starting_gradle(self):
         with self.assertRaises(SystemExit):

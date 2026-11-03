@@ -6,7 +6,7 @@
 
 Install JDK 21, Android SDK platform 37, Build Tools 36.0.0 and Python 3.11+. Configure the SDK in untracked `local.properties` (`sdk.dir=...`) or `ANDROID_HOME`. The Gradle wrapper pins Gradle and the Android plugin supplies Kotlin. Python runs `tools/verify`, the phone runner, metadata regeneration and the build-time icon generator using only the standard library. The checked-in wrapper JAR matches upstream Gradle 9.8.2; it is Apache 2.0 build tooling and is not bundled in the APK.
 
-`tools/verify` uses the standard Gradle cache, respects `JAVA_HOME`, `GRADLE_USER_HOME` and `ANDROID_USER_HOME`, and uses the workstation's JDK 21 when `JAVA_HOME` is unset. If the existing project debug key is present at `tmp/android/debug.keystore`, it selects that Android user directory so builds remain compatible with the connected phone. Keys stay untracked. On other machines, set these variables as needed.
+`tools/verify` uses the standard Gradle cache, respects `JAVA_HOME`, `GRADLE_USER_HOME` and `ANDROID_USER_HOME`, and uses the workstation's JDK 21 when `JAVA_HOME` is unset. Debug builds use the Android user directory default (`~/.android`), which holds the same debug key published APKs are signed with; set `ANDROID_USER_HOME` to override. Keys stay untracked.
 
 The first run needs network access to download build, test, lint and formatter dependencies. Later runs can use `--offline`. Missing artifacts are setup failures, not failing tests. The formatter is a pinned build-only ktfmt dependency; it is not packaged with the app.
 
@@ -95,7 +95,7 @@ adb -s SERIAL shell am instrument -w -e phase station-benchmark app.drizziq.test
 adb -s SERIAL shell am instrument -w -e phase radar-gestures app.drizziq.test/app.drizziq.PhoneExercise
 ```
 
-A signature mismatch means the build used a different key. Find/use the original key; never uninstall the app to get past the mismatch. On this workstation it is `tmp/android/debug.keystore`.
+A signature mismatch means the build used a different key. Find/use the original key; never uninstall the app to get past the mismatch. Debug builds, release APKs and published APKs share `~/.android/debug.keystore`.
 
 Before the first instrumentation phase, the runner force-stops the app and snapshots the original selected place and favourites (`shared_prefs/places.xml` plus its `.bak`) and saved map camera (`shared_prefs/radar-viewport.xml` plus its `.bak`) through `run-as`. Backups are included because Android promotes a stale `.bak` to the main preference file on load. After every run, including a smoke failure before Places or full integration, it attempts each restoration action, reports cleanup failures alongside the original error, and reopens the app. This requires the installed debuggable debug APK; the runner never uninstalls or requests permissions. Full integration separately restores connectivity, including originally disabled radios.
 
