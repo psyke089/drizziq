@@ -7,7 +7,7 @@
 - This workstation has JDK 21 at `/usr/lib/jvm/java-21-openjdk` and SDK at `/home/psyke/Android/Sdk`. Keep machine-specific paths out of tracked build configuration.
 - `tools/verify` supplies local environment defaults; caller-provided environment variables take precedence. `--offline` requires dependencies to have been downloaded previously. Report missing dependencies separately from test failures.
 - This is a personal, single-developer project, not an app-store product. Prefer working behavior and low maintenance over process completeness; the checks below are sized accordingly.
-- GitHub Actions mirrors every push to `main` and every `v*` tag through the Codeberg push mirror; the workflow runs `./tools/verify` and publishes release APKs. The remote run is a backstop; run the release gate locally before tagging. See `docs/DEVELOPMENT.md` for the mirror, tag and signing rules.
+- Codeberg is the source of truth; the `github` remote is pushed to directly (there is no push mirror). Every push to `main` and every `v*` tag that reaches GitHub runs `.github/workflows/ci.yml`, which runs `./tools/verify` and publishes release APKs. Push `main` to both remotes and keep tags in sync. The remote run is a backstop; run the release gate locally before tagging. See `docs/DEVELOPMENT.md` for the remote, tag and signing rules.
 
 ## Product design, assets and data
 

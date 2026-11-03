@@ -105,29 +105,29 @@ Smoke checks do not change connectivity or favourites; camera changes from map g
 
 Phone logs go to ignored `tmp/verification/` by default (`--reports PATH` overrides it). Full integration also captures the offline screen. The cleanup reopens Drizziq because instrumentation may return to the launcher. Before manual taps, verify the foreground package and current bounds. Keep visual checks brief; do not repeatedly capture screens to assess small aesthetic details.
 
-## GitHub mirror and releases
+## GitHub remote and releases
 
-Codeberg is the source of truth. A Forgejo push mirror maintains a public `psyke089/drizziq`
-copy on GitHub, where `.github/workflows/ci.yml` runs:
+Codeberg is the source of truth. A second remote, `github`
+(`git@github.com:psyke089/drizziq.git`), is pushed to directly; there is no push mirror. Push
+`main` with `git push github main` and tags with `git push github --tags` after pushing to
+Codeberg. GitHub runs `.github/workflows/ci.yml`:
 
 - every push to `main` runs `./tools/verify`, the same gate as a local checkout without a phone;
 - every `v*` tag, or a manual `workflow_dispatch`, additionally checks that the tag matches
   `versionName`, that the built APK reports that version and the public release signature, then
   publishes `drizziq-<version>.apk` and its `.sha256` as release assets.
 
-GitHub is force-pushed and pruned by the mirror. Never commit, branch or tag there by hand; keep
-every workflow file in Codeberg. `tools/install-android-sdk.sh` installs the platform and build
-tools the workflow needs, and is usable on a fresh machine.
+Keep every workflow file in Codeberg and mirror it to GitHub. `tools/install-android-sdk.sh`
+installs the platform and build tools the workflow needs, and is usable on a fresh machine.
 
 Published APKs keep the signing identity of the earlier Codeberg releases: the key at
 `~/.android/debug.keystore`, stored in the `DRIZZIQ_KEYSTORE_B64` repository secret. The workflow
 fails rather than publishing a build signed with a runner-generated key, because that breaks
 updates with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`. Rotating the key is a deliberate user-facing
-break, not a routine change. The mirror itself needs a fine-grained token with Contents and
-Workflows write access, kept in Codeberg's mirror settings and never in the repository.
+break, not a routine change.
 
-Push `main` and a release tag separately. A tag that arrives in the same atomic mirror push as
-`main` can skip its release run; recover with `gh workflow run ci.yml --ref v<version>`.
+Push `main` and a release tag separately. If the tag's release run does not start, recover with
+`gh workflow run ci.yml --ref v<version>`.
 
 ## Release screenshots
 
