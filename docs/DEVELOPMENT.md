@@ -77,12 +77,12 @@ python3 tools/verify_phone.py --serial SERIAL --full
 
 The runner rejects an instrumentation phase outside its registered suite,
 focused-check and probe groups, and the instrumentation runner fails an unknown
-phase instead of reporting `PASS`. `lifecycle-hardening` recreates the Activity
-with the Data & licences dialog open, then asserts the replacement Activity's own
-view tree (Places shown, dialog dismissed, no leaked window). It deliberately does
-not use the accessibility tree there: on API 33, destroying the focused dialog
-window detaches the instrumentation accessibility connection for the rest of that
-run.
+phase instead of reporting `PASS`. `lifecycle` recreates the Activity with Places
+selected and again with the Data & licences dialog open, then asserts the
+replacement Activity's own view tree (Places shown, dialog dismissed, no leaked
+window). It deliberately does not use the accessibility tree for the dialog case:
+on API 33, destroying the focused dialog window detaches the instrumentation
+accessibility connection for the rest of that run.
 
 Diagnostic probes report measurements or
 exercise gestures and are not part of suite gating; invoke one directly when
