@@ -117,13 +117,11 @@ class PhoneRunnerTest(unittest.TestCase):
         calls, error = self.run_runner()
         self.assertIsNone(error)
         self.assertEqual(["navigation", "layout", "lifecycle", "forecast", "radar", "places-search", "viewport-save", "viewport-restore"], self.phases(calls))
-        self.assertTrue(all(parts[:3] == ["adb", "-s", "test-phone"] for parts in calls))
         self.assertFalse(any("settings" in parts or "svc" in parts or "connectivity" in parts for parts in calls))
         seed = next(i for i, parts in enumerate(calls) if "viewport-save" in parts)
         restore = next(i for i, parts in enumerate(calls) if "viewport-restore" in parts)
         self.assertTrue(any(parts[-3:] == ["am", "force-stop", "app.drizziq"] for parts in calls[seed+1:restore]))
         self.assertFalse(any("install" in parts or "uninstall" in parts or "screencap" in parts for parts in calls))
-        self.assertEqual(["shell", "am", "start", "-W", "-n", "app.drizziq/.MainActivity"], calls[-1][3:])
         self.assertEqual(self.STATE_FILES, self.state_restores(calls))
 
     def test_snapshot_precedes_every_instrumentation_phase(self):

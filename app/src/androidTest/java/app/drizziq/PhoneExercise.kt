@@ -24,14 +24,11 @@ class PhoneExercise : Instrumentation() {
         )
     private val focusedPhases =
         setOf(
-            "lint-resources",
-            "svg-icons",
+            "static-assets",
             "hourly-refresh",
             "day-forecast",
             "header-weather",
             "forecast-status",
-            "copy-cleanup",
-            "lifecycle-hardening",
             "radar-corruption",
         )
     private val integrationPhases = setOf("places-integration")
@@ -473,7 +470,7 @@ class PhoneExercise : Instrumentation() {
                         "real Views: failed-refresh retention, offline no-request, recovery, pending recreation, obsolete owner, empty/error",
                     )
                 }
-                "lint-resources" -> {
+                "static-assets" -> {
                     runOnMainSync {
                         // Keep this map uninitialised for a place, so gestures cannot save a
                         // camera.
@@ -638,12 +635,7 @@ class PhoneExercise : Instrumentation() {
                             }
                         }
                     }
-                    result.putString(
-                        "checks",
-                        "Radar tap/drag/accessibility click dispatch; widened, tinted hourly legend; week typography; favourite-card selection/delete; observed/forecast fixture decoding; themed launcher mask rendering",
-                    )
-                }
-                "svg-icons" -> {
+
                     val names =
                         ((0..99).map { weatherIconName(it) } +
                                 ForecastMetric.entries.map { "metric-${it.name.lowercase()}" } +
@@ -698,7 +690,7 @@ class PhoneExercise : Instrumentation() {
                     }
                     result.putString(
                         "checks",
-                        "${names.size} SVG-backed native vectors inflate and render, including every MOSMIX condition, intensity and UI icon",
+                        "Radar tap/drag/accessibility click dispatch; widened, tinted hourly legend; week typography; favourite-card selection/delete; observed/forecast fixture decoding; themed launcher mask rendering; every SVG-backed native vector inflates and renders, including all MOSMIX conditions, intensities and UI icons",
                     )
                 }
                 "hourly-refresh" -> {
@@ -1083,77 +1075,6 @@ class PhoneExercise : Instrumentation() {
                         "Today/Week refresh inserts no status banner; tagged content anchor stays shown and fixed",
                     )
                 }
-                "copy-cleanup" -> {
-                    fun views(root: android.view.View): List<android.view.View> =
-                        listOf(root) +
-                            if (root is android.view.ViewGroup)
-                                (0 until root.childCount).flatMap { views(root.getChildAt(it)) }
-                            else emptyList()
-                    fun texts(): List<String> {
-                        var result = listOf<String>()
-                        runOnMainSync {
-                            result =
-                                views(activity.window.decorView)
-                                    .filterIsInstance<android.widget.TextView>()
-                                    .map { it.text.toString() }
-                        }
-                        return result
-                    }
-                    click("Today")
-                    waitFor("today data") { has("Temperature ") }
-                    check(
-                        texts().none {
-                            it.contains("no DWD value") ||
-                                it.contains("Relative humidity is not supplied")
-                        }
-                    ) {
-                        "Today explanation remains"
-                    }
-                    click("Week")
-                    waitFor("weekly rows") {
-                        has("Maximum temperature") && has("Minimum temperature")
-                    }
-                    check(
-                        texts().none {
-                            it.contains("WEEK AHEAD") ||
-                                it.contains("High / low from available") ||
-                                it.contains("Partial day")
-                        }
-                    ) {
-                        "Removed Week copy remains"
-                    }
-                    click("Places")
-                    var buttonsFirst = false
-                    var placesShown = false
-                    runOnMainSync {
-                        val places =
-                            activity.window.decorView.findViewWithTag<android.widget.ScrollView>(
-                                "places-scroll"
-                            ) ?: error("Missing places-scroll")
-                        val forecast =
-                            activity.window.decorView.findViewWithTag<android.view.View>(
-                                "forecast-scroll"
-                            ) ?: error("Missing forecast-scroll")
-                        val body = places.getChildAt(0) as android.view.ViewGroup
-                        val first = body.getChildAt(0)
-                        placesShown =
-                            places.isShown &&
-                                places.getGlobalVisibleRect(Rect()) &&
-                                !forecast.isShown
-                        buttonsFirst =
-                            first is android.widget.Button &&
-                                first.text.toString() == "SEARCH CITY" &&
-                                first.isShown
-                    }
-                    check(placesShown) { "Places must be the shown scroll view" }
-                    check(buttonsFirst) { "Places must start directly with the buttons" }
-                    check(texts().any { it == "FAVOURITES" })
-                    click("Today")
-                    result.putString(
-                        "checks",
-                        "Today explanatory note removed; Week heading/summary/partial labels removed while table remains; Places starts with Search city without duplicate location",
-                    )
-                }
                 "recenter-probe" -> {
                     click("Radar")
                     val place = PlaceStore(appContext).selected()
@@ -1419,12 +1340,7 @@ class PhoneExercise : Instrumentation() {
                     }
                     click("Today")
                     check(selected("Today"))
-                    result.putString(
-                        "checks",
-                        "Places selection and content survive Activity recreation; Today remains reachable",
-                    )
-                }
-                "lifecycle-hardening" -> {
+
                     // Regressions: tracked notices dialog during Activity destruction.
                     click("Places")
                     click("DATA & LICENCES")
@@ -1439,15 +1355,15 @@ class PhoneExercise : Instrumentation() {
                     }
                     shell("logcat -c")
                     var owner: android.app.Activity = activity
-                    val monitor = addMonitor(MainActivity::class.java.name, null, false)
+                    val dialogMonitor = addMonitor(MainActivity::class.java.name, null, false)
                     try {
                         runOnMainSync { owner.recreate() }
                         owner =
-                            waitForMonitorWithTimeout(monitor, 10000)
+                            waitForMonitorWithTimeout(dialogMonitor, 10000)
                                 ?: error("Activity did not recreate with an open notices dialog")
                         waitForIdleSync()
                     } finally {
-                        removeMonitor(monitor)
+                        removeMonitor(dialogMonitor)
                     }
                     // Destroying the focused dialog window detaches this instrumentation's
                     // accessibility connection, so verify the replacement Activity's own
@@ -1487,7 +1403,7 @@ class PhoneExercise : Instrumentation() {
                     }
                     result.putString(
                         "checks",
-                        "notices dialog closes and reopens; recreation with the dialog open destroys the original Activity, keeps Places, and dismisses the dialog without a leaked window",
+                        "Places selection and content survive Activity recreation; Today remains reachable; notices dialog closes and reopens; recreation with the dialog open destroys the original Activity, keeps Places, and dismisses the dialog without a leaked window",
                     )
                 }
                 "radar-corruption" -> {

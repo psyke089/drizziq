@@ -23,14 +23,11 @@ SMOKE_PHASES = (
     "viewport-restore",
 )
 FOCUSED_PHASES = (
-    "lint-resources",
-    "svg-icons",
+    "static-assets",
     "hourly-refresh",
     "day-forecast",
     "header-weather",
     "forecast-status",
-    "copy-cleanup",
-    "lifecycle-hardening",
     "radar-corruption",
     "fixture-forecast",
     "fixture-states",

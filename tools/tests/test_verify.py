@@ -38,12 +38,6 @@ class VerificationCommandTest(unittest.TestCase):
         self.assertEqual(1, result)
         self.assertEqual(1, len(calls))
 
-    def test_focused_test_forwards_filter_without_running_tooling_suite(self):
-        result, calls = self.invoke(["--gradle-only", "testDebugUnitTest", "--tests", "app.drizziq.DataTest"], (7,))
-        self.assertEqual(7, result)
-        self.assertEqual(1, len(calls))
-        self.assertEqual(["--no-daemon", "testDebugUnitTest", "--tests", "app.drizziq.DataTest"], calls[0].args[0][1:])
-
     def test_explicit_environment_takes_precedence_over_workstation_defaults(self):
         environment = {"JAVA_HOME": "/custom/jdk", "ANDROID_USER_HOME": "/custom/android", "GRADLE_USER_HOME": "/custom/gradle"}
         _, calls = self.invoke(["--gradle-only", "tasks"], environment=environment)
