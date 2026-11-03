@@ -27,10 +27,48 @@ class RadarMap(context: Context) : View(context) {
             }
     private val tiles = LruCache<String, Bitmap>(64)
     private val waiting = mutableSetOf<String>()
-    private val failed = mutableMapOf<String, Long>()
+    private val failed = BoundedAccessMap<String, Long>(CachePolicy.FAILED_TILE_KEYS)
     private val executor = Executors.newFixedThreadPool(3)
     private val handler = Handler(Looper.getMainLooper())
+    internal var overlayChanged: (() -> Unit)? = null
+    private val overlays =
+        OverlayTiles(context) {
+            invalidate()
+            overlayChanged?.invoke()
+        }
+    internal val overlayNotice
+        get() = overlays.notice
+
+    internal val overlaySelection
+        get() = overlays.selection
+
+    internal fun overlay(layer: Overlay?, time: Long, online: Boolean) {
+        overlays.set(layer, time, online)
+    }
+
     private val folder = File(context.cacheDir, "tiles").apply { mkdirs() }
+    private val storage by lazy {
+        CacheStore(
+            folder,
+            CachePolicy.BASEMAP_BYTES,
+            eligible = { it.endsWith(".png") },
+            indexName = "access.tsv",
+        )
+    }
+    private val tileFetcher by lazy {
+        TileFetcher(
+            folder = folder,
+            receipts = TileReceipts(File(folder, "tile-receipts.tsv")),
+            decode = { bytes -> BitmapFactory.decodeByteArray(bytes, 0, bytes.size) },
+            decodeFile = { file -> BitmapFactory.decodeFile(file.path) },
+            fetch = { address, etag, lastModified ->
+                Http.conditional(address, 1500000, etag, lastModified)
+            },
+            clock = AppPlatform::now,
+            onRead = storage::read,
+            onWrite = storage::wrote,
+        )
+    }
     private val viewportPreferences =
         context.getSharedPreferences("radar-viewport", Context.MODE_PRIVATE)
     private var placeInitialized = false
@@ -149,6 +187,7 @@ class RadarMap(context: Context) : View(context) {
             "Precipitation map. Drag to pan, pinch or double tap to zoom. Zoom and recenter actions are available to accessibility services."
         isFocusable = true
         recenter()
+        executor.execute { storage.prune() }
     }
 
     private fun world() = 256.0 * 2.0.pow(zoom)
@@ -282,38 +321,23 @@ class RadarMap(context: Context) : View(context) {
         if (
             disposed ||
                 key in waiting ||
-                (failed[key]?.let { System.currentTimeMillis() - it < 60000 } == true)
+                (failed[key]?.let { AppPlatform.now() - it < 60000 } == true)
         )
             return
         waiting.add(key)
         executor.execute {
-            var image: Bitmap? = null
-            try {
-                val file = File(folder, "$key.png")
-                if (file.exists()) image = BitmapFactory.decodeFile(file.path)
-                if (
-                    online &&
-                        (image == null ||
-                            System.currentTimeMillis() - file.lastModified() > 7 * 86400000L)
-                ) {
-                    val data = Http.bytes("https://tile.openstreetmap.org/$z/$tx/$ty.png", 1500000)
-                    val downloaded =
-                        BitmapFactory.decodeByteArray(data, 0, data.size)
-                            ?: error("Invalid map tile")
-                    val temp = File(file.path + ".part")
-                    temp.writeBytes(data)
-                    check(temp.renameTo(file))
-                    image = downloaded
-                }
-            } catch (_: Exception) {
-                /* A previously cached tile stays visible. */
+            val result = runCatching {
+                tileFetcher.load(
+                    key,
+                    "https://tile.openstreetmap.org/$z/$tx/$ty.png",
+                    online,
+                )
             }
-            val result = image
+                .getOrNull()
             handler.post {
                 if (!disposed) {
                     waiting.remove(key)
-                    if (result != null) tiles.put(key, result)
-                    else failed[key] = System.currentTimeMillis()
+                    if (result != null) tiles.put(key, result) else failed[key] = AppPlatform.now()
                     invalidate()
                 }
             }
@@ -358,6 +382,7 @@ class RadarMap(context: Context) : View(context) {
             if (image == null) request(key, z, nx, iy)
         }
         p.colorFilter = null
+        overlays.draw(c, x, y, zoom, width, height)
         val f = frame
         val image = bitmap
         if (f != null && image != null) {
@@ -393,6 +418,7 @@ class RadarMap(context: Context) : View(context) {
 
     fun dispose() {
         disposed = true
+        overlays.close()
         executor.shutdownNow()
         handler.removeCallbacksAndMessages(null)
         tiles.evictAll()
@@ -439,7 +465,7 @@ class RadarTimeline(context: Context) : View(context) {
             p.color = if (i <= selected) Hud.cyan else Hud.muted
             c.drawCircle(pos(f.time), y, context.dp(1).toFloat(), p)
         }
-        val now = System.currentTimeMillis()
+        val now = AppPlatform.now()
         if (now in frames.first().time..frames.last().time) {
             p.color = Hud.amber
             p.strokeWidth = context.dp(1).toFloat()

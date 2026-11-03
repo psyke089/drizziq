@@ -53,12 +53,12 @@ class ForecastPresentationTest {
         assertEquals(2, currentHourColumn(columns, at("2026-10-25T00:30:00Z")))
         assertEquals(3, currentHourColumn(columns, at("2026-10-25T01:30:00Z")))
         assertEquals(0, currentHourColumn(columns, columns.first().time - 1))
-        assertEquals(24, currentHourColumn(columns, columns.last().time + 3600000))
+        assertEquals(37, currentHourColumn(columns, columns.last().time + 3600000))
         assertEquals(0, currentHourColumn(emptyList(), 0))
     }
 
     @Test
-    fun hourlyColumns_localCalendarDay_keepsPastValuesGapsAndMidnightBounds() {
+    fun hourlyColumns_throughTomorrowNoon_keepsPastValuesGapsAndSourceInstants() {
         val start = at("2026-10-30T23:00:00Z")
         val first = Hour(start, mapOf("TTT" to 280.0))
         val columns =
@@ -72,13 +72,17 @@ class ForecastPresentationTest {
                 at("2026-10-31T11:30:00Z"),
                 "Europe/Berlin",
             )
-        assertEquals(24, columns.size)
+        assertEquals(37, columns.size)
         assertEquals(start, columns.first().time)
         assertSame(first, columns.first().hour)
         assertNull(columns[1].hour)
         assertNull(columns[2].hour!!.temperature)
-        assertEquals(start + 23 * 3600000, columns.last().time)
-        assertTrue(columns.none { it.hour?.temperature == 290.0 - 273.15 })
+        assertEquals(start + 36 * 3600000, columns.last().time)
+        assertEquals(
+            290.0 - 273.15,
+            columns.single { it.time == start + 86400000 }.hour!!.temperature!!,
+            0.0,
+        )
     }
 
     @Test
@@ -87,25 +91,31 @@ class ForecastPresentationTest {
         for (product in
             listOf(forecast(), forecast(Hour(at("2026-10-30T00:00:00Z"), emptyMap())))) {
             val columns = hourlyColumns(product, now, "Europe/Berlin")
-            assertEquals(24, columns.size)
+            assertEquals(37, columns.size)
             assertTrue(columns.all { it.hour == null })
             assertEquals("00:00", Times.format(columns.first().time, "HH:mm", "Europe/Berlin"))
         }
     }
 
     @Test
-    fun hourlyColumns_dstDays_contain23Or25RealHoursIncludingBothRepeatedTimes() {
+    fun hourlyColumns_dstDays_keepRepeatedHoursThroughTomorrowNoon() {
         val fall = hourlyColumns(forecast(), at("2026-10-25T12:00:00Z"), "Europe/Berlin")
-        assertEquals(25, fall.size)
+        assertEquals(38, fall.size)
         assertEquals(
             listOf("02:00 CEST", "02:00 CET"),
             fall
+                // Tomorrow also contains 02:00; only this local date has the repeated hour.
+                .filter { Times.day(it.time, "Europe/Berlin") == "2026-10-25" }
                 .map { Times.format(it.time, "HH:mm z", "Europe/Berlin") }
                 .filter { it.startsWith("02:") },
         )
         val spring = hourlyColumns(forecast(), at("2026-03-29T12:00:00Z"), "Europe/Berlin")
-        assertEquals(23, spring.size)
-        assertFalse(spring.any { Times.format(it.time, "HH:mm", "Europe/Berlin") == "02:00" })
+        assertEquals(36, spring.size)
+        assertFalse(
+            spring
+                .filter { Times.day(it.time, "Europe/Berlin") == "2026-03-29" }
+                .any { Times.format(it.time, "HH:mm", "Europe/Berlin") == "02:00" }
+        )
     }
 
     @Test
@@ -116,7 +126,33 @@ class ForecastPresentationTest {
         assertEquals("00:00", Times.format(columns.first().time, "HH:mm", "Asia/Kolkata"))
         assertSame(value, columns.single { it.time == time }.hour)
         assertEquals("01:30", Times.format(time, "HH:mm", "Asia/Kolkata"))
-        assertTrue(columns.all { Times.day(it.time, "Asia/Kolkata") == "2026-10-31" })
+        assertEquals(
+            "2026-11-01 12:00",
+            Times.format(columns.last().time, "yyyy-MM-dd HH:mm", "Asia/Kolkata"),
+        )
+        assertNull(columns.last().hour)
+    }
+
+    @Test
+    fun hourlyColumns_noonUsesCivilTimeAcrossEitherDaysDstAndDateRollover() {
+        for ((now, end) in
+            listOf(
+                "2026-03-28T12:00:00Z" to "2026-03-29T10:00:00Z",
+                "2026-03-29T12:00:00Z" to "2026-03-30T10:00:00Z",
+                "2026-10-24T12:00:00Z" to "2026-10-25T11:00:00Z",
+                "2026-10-25T12:00:00Z" to "2026-10-26T11:00:00Z",
+                "2026-11-01T00:00:00Z" to "2026-11-02T11:00:00Z",
+            )) {
+            val noon = Hour(at(end), mapOf("TTT" to 280.0))
+            val after = noon.copy(time = noon.time + 3600000)
+            val columns = hourlyColumns(forecast(noon, after), at(now), "Europe/Berlin")
+            assertEquals(at(end), columns.last().time)
+            assertSame(noon, columns.last().hour)
+            assertFalse(columns.any { it.time == after.time })
+            val missing = hourlyColumns(forecast(after), at(now), "Europe/Berlin")
+            assertEquals(at(end), missing.last().time)
+            assertNull(missing.last().hour)
+        }
     }
 
     @Test

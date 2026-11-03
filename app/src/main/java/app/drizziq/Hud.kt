@@ -11,7 +11,9 @@ import kotlin.math.*
 object Hud {
     val bg = Color.rgb(8, 15, 25)
     val panel = Color.rgb(15, 26, 40)
-    val legend = Color.rgb(16, 43, 53)
+    val legend = Color.rgb(21, 37, 54)
+    val tableHeader = Color.rgb(32, 58, 76)
+    val currentHour = Color.rgb(36, 92, 96)
     val line = Color.rgb(35, 53, 72)
     val ink = Color.rgb(232, 241, 247)
     val muted = Color.rgb(147, 167, 188)
@@ -49,6 +51,9 @@ fun Context.label(text: String, size: Float = 14f, color: Int = Hud.ink, mono: B
             if (mono) Typeface.create("monospace", Typeface.NORMAL)
             else Typeface.create("sans-serif", Typeface.NORMAL)
     }
+
+fun Context.hudString(id: Int, vararg arguments: Any): String =
+    if (arguments.isEmpty()) getString(id) else hudFormat(getString(id), *arguments)
 
 fun Context.column() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 

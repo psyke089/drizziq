@@ -57,6 +57,8 @@ Generic amounts that are missing/invalid keep the neutral medium variant.
 DWD `81` covers moderate **or** heavy showers: use the heavy variant from
 7.5 mm/h, otherwise medium. DWD `95` uses the heavier storm artwork from
 7.5 mm/h. Explicit freezing and mixed light/heavy codes keep their own variants.
+The generic snow-shower code `26` uses the existing light snow-shower artwork;
+the icon does not assert an intensity for that code.
 
 Wind has a separate symbol beside the speed, preserving the weather condition
 and compass. Its thresholds use supplied mean speed, **not gusts**:

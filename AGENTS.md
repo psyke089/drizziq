@@ -32,9 +32,10 @@ Documentation and formatting-only changes do not need artificial behavior tests.
 - Focused JVM test: `./tools/verify --gradle-only testDebugUnitTest --tests 'app.drizziq.ReadingPolicyTest'`
 - Formatting check / apply: `./tools/verify --gradle-only formatCheck` / `./tools/verify --gradle-only formatKotlin`
 - Android lint: `./tools/verify --gradle-only lintDebug`
-- Phone smoke checks: `python3 tools/verify_phone.py --serial SERIAL` (navigation/layout, lifecycle, Today/Week forecast, radar, city search/cancel and viewport restart checks; no favourites or connectivity changes).
+- Phone smoke checks: `python3 tools/verify_phone.py --serial SERIAL` (navigation/layout, lifecycle, Today/Week forecast, radar, city search/cancel and viewport restart checks; no favourites or connectivity changes). The runner snapshots and restores the original selected place, favourites and camera after success or failure and requires the debuggable debug APK.
+- Focused phone regression checks: `python3 tools/verify_phone.py --serial SERIAL --focused` (lint resources, SVG vectors, hourly refresh, day forecast, shared header weather, refresh-banner absence, removed copy and Places layout). Diagnostic probes are documented for direct invocation in `docs/DEVELOPMENT.md`.
 - Places integration: `python3 tools/verify_phone.py --serial SERIAL --places-integration` (selects/saves test places, restores original places and camera; leaves permissions/settings unchanged).
-- Full phone integration: `python3 tools/verify_phone.py --serial SERIAL --full` (also creates/deletes test favourites and temporarily changes airplane mode, Wi-Fi and mobile data; restores original settings).
+- Full phone integration: `python3 tools/verify_phone.py --serial SERIAL --full` (also creates/deletes test favourites and temporarily changes airplane mode, Wi-Fi and mobile data; restores original places, camera and settings).
 - Phone runner expects matching debug and test APKs installed. It does not install/uninstall applications. See `docs/DEVELOPMENT.md` for signing and installation.
 
 Android lint and ktfmt are the configured analysis/formatting tools. Detekt, ktlint, Paparazzi, managed-emulator tasks, MockK, Turbine and Konsist are not installed; do not claim their checks passed or add them without a concrete need.

@@ -11,29 +11,92 @@ import kotlin.math.*
 /** The projection declared in the current DWD DE1200 ODIM data, in metres. */
 object RadarProjection {
     private const val A = 6378137.0
-    private const val E = 0.08181919084262149
-    private val phiC = Math.toRadians(60.0)
+    private const val B = 6356752.3142451802
+    private const val LAT_TS = 60.0
+    private const val LAT_0 = 90.0
+    private const val LON_0 = 10.0
+    private const val ORIGIN_X = 543196.83521776402
+    private const val ORIGIN_Y = 3622588.8619310022
+    private val E = sqrt(1 - (B / A).pow(2))
+    private val phiC = Math.toRadians(LAT_TS)
+    private val supported =
+        setOf("proj", "lat_ts", "lat_0", "lon_0", "x_0", "y_0", "units", "a", "b", "no_defs")
 
     private fun t(phi: Double) =
         tan(Math.PI / 4 - phi / 2) / ((1 - E * sin(phi)) / (1 + E * sin(phi))).pow(E / 2)
 
     private val scale = A * cos(phiC) / sqrt(1 - E * E * sin(phiC).pow(2)) / t(phiC)
 
+    fun validate(projdef: String) {
+        require(projdef.isNotBlank()) { "Unsupported radar projection: missing +proj" }
+        val params = LinkedHashMap<String, String?>()
+        for (token in projdef.trim().split(Regex("\\s+"))) {
+            require(token.length > 1 && token.startsWith('+')) {
+                "Unsupported radar projection: malformed parameter '$token'"
+            }
+            val body = token.substring(1)
+            val equals = body.indexOf('=')
+            val key = if (equals < 0) body else body.substring(0, equals)
+            val value = if (equals < 0) null else body.substring(equals + 1)
+            require(key.isNotEmpty()) {
+                "Unsupported radar projection: malformed parameter '$token'"
+            }
+            require(!params.containsKey(key)) {
+                "Unsupported radar projection: duplicate +$key"
+            }
+            params[key] = value
+        }
+        for ((key, value) in params) {
+            require(key in supported) { "Unsupported radar projection: unsupported +$key" }
+            if (key == "no_defs") {
+                require(value == null) {
+                    "Unsupported radar projection: +no_defs must not have a value"
+                }
+            }
+        }
+        for (key in supported) {
+            if (key != "no_defs") {
+                require(params.containsKey(key)) { "Unsupported radar projection: missing +$key" }
+            }
+        }
+        require(params["proj"] == "stere") {
+            "Unsupported radar projection: +proj=${params["proj"]} (expected stere)"
+        }
+        require(params["units"] == "m") {
+            "Unsupported radar projection: +units=${params["units"]} (expected m)"
+        }
+        requireNumber(params, "lat_ts", LAT_TS)
+        requireNumber(params, "lat_0", LAT_0)
+        requireNumber(params, "lon_0", LON_0)
+        requireNumber(params, "x_0", ORIGIN_X)
+        requireNumber(params, "y_0", ORIGIN_Y)
+        requireNumber(params, "a", A)
+        requireNumber(params, "b", B)
+    }
+
+    private fun requireNumber(params: Map<String, String?>, key: String, expected: Double) {
+        val raw = params.getValue(key)
+        val value = raw?.toDoubleOrNull()
+        require(value != null && value.isFinite() && abs(value - expected) <= 1e-6) {
+            "Unsupported radar projection: +$key=$raw (expected $expected)"
+        }
+    }
+
     fun project(lat: Double, lon: Double): Pair<Double, Double> {
         val r = scale * t(Math.toRadians(lat))
-        val lambda = Math.toRadians(lon - 10)
-        return (r * sin(lambda) + 543196.83521776402) to (-r * cos(lambda) + 3622588.8619310022)
+        val lambda = Math.toRadians(lon - LON_0)
+        return (r * sin(lambda) + ORIGIN_X) to (-r * cos(lambda) + ORIGIN_Y)
     }
 
     fun unproject(x: Double, y: Double): Pair<Double, Double> {
-        val px = x - 543196.83521776402
-        val py = y - 3622588.8619310022
+        val px = x - ORIGIN_X
+        val py = y - ORIGIN_Y
         val tt = hypot(px, py) / scale
         var phi = Math.PI / 2 - 2 * atan(tt)
         repeat(10) {
             phi = Math.PI / 2 - 2 * atan(tt * ((1 - E * sin(phi)) / (1 + E * sin(phi))).pow(E / 2))
         }
-        return Math.toDegrees(phi) to (10 + Math.toDegrees(atan2(px, -py)))
+        return Math.toDegrees(phi) to (LON_0 + Math.toDegrees(atan2(px, -py)))
     }
 }
 
@@ -64,6 +127,14 @@ data class RadarSequence(
     val issue: Long,
     val historyComplete: Boolean,
 )
+
+/** Next timeline position, wrapping from the last frame back to the first. */
+internal fun nextRadarFrame(current: Int, size: Int): Int =
+    when {
+        size <= 0 -> 0
+        current !in 0 until size - 1 -> 0
+        else -> current + 1
+    }
 
 data class RadarPixels(val time: Long, val grid: RadarGrid, val colors: IntArray)
 
@@ -110,16 +181,7 @@ object Odim {
             val what = hdf.getByPath("/dataset1/data1/what")
             val interval = hdf.getByPath("/dataset1/what")
             require(what.string("quantity") == "ACRR") { "Unexpected radar unit" }
-            val proj = where.string("projdef")
-            require(
-                proj.contains("+proj=stere") &&
-                    proj.contains("+lat_ts=60") &&
-                    proj.contains("+lon_0=10") &&
-                    proj.contains("+a=6378137") &&
-                    proj.contains("+x_0=543196")
-            ) {
-                "Unsupported DWD projection"
-            }
+            RadarProjection.validate(where.string("projdef"))
             val w = where.number("xsize").toInt()
             val h = where.number("ysize").toInt()
             require(w in 1..2000 && h in 1..2000) { "Unexpected radar dimensions" }

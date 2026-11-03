@@ -2,8 +2,6 @@ package app.drizziq
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.os.Handler
 import android.os.Looper
 import java.io.*
@@ -11,8 +9,6 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
-import org.json.JSONArray
-import org.json.JSONObject
 
 object Http {
     val downloads = DownloadTracker()
@@ -20,15 +16,15 @@ object Http {
         "Drizziq/${BuildConfig.VERSION_NAME} (Android; https://codeberg.org/k4r/drizziq)"
     const val WEATHER = "https://opendata.dwd.de/weather/"
 
+    internal fun allowed(url: URL): Boolean =
+        url.protocol == "https" &&
+            (Geocoding.allowed(url) ||
+                url.host == "tile.openstreetmap.org" ||
+                (url.host == "opendata.dwd.de" && url.path.startsWith("/weather/")) ||
+                (url.host == "maps.dwd.de" && url.path == "/geoserver/dwd/wms"))
+
     private fun checked(url: URL) {
-        require(
-            url.protocol == "https" &&
-                (Geocoding.allowed(url) ||
-                    url.host == "tile.openstreetmap.org" ||
-                    (url.host == "opendata.dwd.de" && url.path.startsWith("/weather/")))
-        ) {
-            "Unapproved data endpoint"
-        }
+        require(allowed(url)) { "Unapproved data endpoint" }
     }
 
     fun bytes(address: String, limit: Int = 32000000, range: String? = null): ByteArray =
@@ -36,12 +32,74 @@ object Http {
             request(address, limit, range)
         }
 
+    /**
+     * Conditional image/data GET. Persisted validators are only attached when present; a 304 is
+     * returned without reading a body so callers can keep their cached representation.
+     */
+    internal fun conditional(
+        address: String,
+        limit: Int = 32000000,
+        etag: String? = null,
+        lastModified: String? = null,
+        open: (URL) -> HttpURLConnection = AppPlatform::open,
+    ): HttpReply = downloads.track {
+        conditionalRequest(address, limit, etag, lastModified, open)
+    }
+
+    private fun conditionalRequest(
+        address: String,
+        limit: Int,
+        etag: String?,
+        lastModified: String?,
+        open: (URL) -> HttpURLConnection,
+    ): HttpReply {
+        var url = URL(address)
+        repeat(4) {
+            checked(url)
+            val c =
+                open(url).apply {
+                    connectTimeout = 15000
+                    readTimeout = 20000
+                    instanceFollowRedirects = false
+                    setRequestProperty("User-Agent", USER_AGENT)
+                    if (!etag.isNullOrEmpty()) setRequestProperty("If-None-Match", etag)
+                    if (!lastModified.isNullOrEmpty()) {
+                        setRequestProperty("If-Modified-Since", lastModified)
+                    }
+                }
+            try {
+                val status = c.responseCode
+                val responseEtag = c.getHeaderField("ETag")?.takeIf { it.isNotEmpty() }
+                val responseModified = c.getHeaderField("Last-Modified")?.takeIf { it.isNotEmpty() }
+                if (status == 304) {
+                    return HttpReply.NotModified(
+                        responseEtag ?: etag,
+                        responseModified ?: lastModified,
+                    )
+                }
+                if (status in 300..399) {
+                    url = URL(url, c.getHeaderField("Location") ?: error("Empty redirect"))
+                    return@repeat
+                }
+                require(status == 200) { "Server returned HTTP $status" }
+                return HttpReply.Ok(
+                    read(c, limit, range = null, status = status),
+                    responseEtag,
+                    responseModified,
+                )
+            } finally {
+                c.disconnect()
+            }
+        }
+        throw IllegalArgumentException("Too many redirects")
+    }
+
     private fun request(address: String, limit: Int, range: String?): ByteArray {
         var url = URL(address)
         repeat(4) {
             checked(url)
             val c =
-                (url.openConnection() as HttpURLConnection).apply {
+                AppPlatform.open(url).apply {
                     connectTimeout = 15000
                     readTimeout = 20000
                     instanceFollowRedirects = false
@@ -58,43 +116,58 @@ object Http {
                     return@repeat
                 }
                 require(status == 200 || status == 206) { "Server returned HTTP $status" }
-                // Servers may ignore Range. Select the requested bytes locally in that case.
-                val start = range?.substringBefore('-')?.toInt() ?: 0
-                val length = range?.substringAfter('-')?.toInt()?.let { it - start + 1 }
-                return c.inputStream.use { input ->
-                    if (range != null && status == 200) {
-                        var n = 0
-                        while (n < start) {
-                            val skipped = input.skip((start - n).toLong()).toInt()
-                            if (skipped == 0) {
-                                require(input.read() >= 0)
-                                n++
-                            } else n += skipped
-                        }
-                    }
-                    val out = ByteArrayOutputStream()
-                    val buffer = ByteArray(8192)
-                    while (length == null || out.size() < length) {
-                        val n =
-                            input.read(
-                                buffer,
-                                0,
-                                if (length == null) buffer.size
-                                else minOf(buffer.size, length - out.size()),
-                            )
-                        if (n < 0) break
-                        require(out.size() + n <= limit) { "Data response too large" }
-                        out.write(buffer, 0, n)
-                    }
-                    if (length != null) require(out.size() == length) { "Truncated DWD response" }
-                    out.toByteArray()
-                }
+                return read(c, limit, range, status)
             } finally {
                 c.disconnect()
             }
         }
         error("Too many redirects")
     }
+
+    private fun read(
+        c: HttpURLConnection,
+        limit: Int,
+        range: String?,
+        status: Int,
+    ): ByteArray =
+        c.inputStream.use { input ->
+            // Servers may ignore Range. Select the requested bytes locally in that case.
+            val start = range?.substringBefore('-')?.toInt() ?: 0
+            val length = range?.substringAfter('-')?.toInt()?.let { it - start + 1 }
+            if (range != null && status == 200) {
+                var n = 0
+                while (n < start) {
+                    val skipped = input.skip((start - n).toLong()).toInt()
+                    if (skipped == 0) {
+                        require(input.read() >= 0)
+                        n++
+                    } else n += skipped
+                }
+            }
+            val out = ByteArrayOutputStream()
+            val buffer = ByteArray(8192)
+            while (length == null || out.size() < length) {
+                val n =
+                    input.read(
+                        buffer,
+                        0,
+                        if (length == null) buffer.size
+                        else minOf(buffer.size, length - out.size()),
+                    )
+                if (n < 0) break
+                require(out.size() + n <= limit) { "Data response too large" }
+                out.write(buffer, 0, n)
+            }
+            if (length != null) require(out.size() == length) { "Truncated DWD response" }
+            out.toByteArray()
+        }
+}
+
+/** Result of [Http.conditional]; a 304 deliberately carries no body. */
+internal sealed class HttpReply {
+    class Ok(val bytes: ByteArray, val etag: String?, val lastModified: String?) : HttpReply()
+
+    class NotModified(val etag: String?, val lastModified: String?) : HttpReply()
 }
 
 class Repository(private val context: Context, private val changed: () -> Unit) {
@@ -127,22 +200,27 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
     var online = true
         private set
 
+    private val forecastCache by lazy {
+        CacheStore(
+            directory,
+            CachePolicy.FORECAST_BYTES,
+            eligible = { name ->
+                name.endsWith(".kmz") &&
+                    (name.startsWith("forecast-") || name.startsWith("MOSMIX_L_"))
+            },
+            indexName = "forecast-access.tsv",
+        )
+    }
+
+    private fun historyExpiry(file: File, now: Long): Boolean =
+        file.name.startsWith("MOSMIX_L_") && now - file.lastModified() > CachePolicy.HISTORY_MS
+
     private fun post(action: () -> Unit) {
         handler.post { if (!closed.get()) action() }
     }
 
-    private fun atomic(file: File, bytes: ByteArray) {
-        val temp = File(file.path + ".part")
-        temp.writeBytes(bytes)
-        check(temp.renameTo(file)) { "Cache write failed" }
-    }
-
     fun connection(): Boolean {
-        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val caps = cm.getNetworkCapabilities(cm.activeNetwork)
-        online =
-            caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true &&
-                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        online = AppPlatform.online(context)
         if (!online) {
             forecast = forecast.failed("Offline · last successful data retained")
             radar = radar.failed("Offline · last successful frames retained")
@@ -158,23 +236,26 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
                 override fun cached(station: Station): CachedForecast? {
                     val file = File(directory, "forecast-${station.id}.kmz")
                     if (!file.exists()) return null
-                    return CachedForecast(
-                        file.inputStream().use { Mosmix.parseKmz(it) },
-                        file.lastModified(),
-                    )
+                    val forecast = file.inputStream().use { Mosmix.parseKmz(it) }
+                    forecastCache.read(file)
+                    return CachedForecast(forecast, file.lastModified())
                 }
 
                 override fun fetch(station: Station): Forecast {
                     check(online) { "Offline" }
-                    val bytes =
-                        Http.bytes(
-                            "${Http.WEATHER}local_forecasts/mos/MOSMIX_L/single_stations/${station.id}/kml/MOSMIX_L_LATEST_${station.id}.kmz",
-                            3000000,
-                        )
-                    val result = Mosmix.parseKmz(bytes.inputStream())
-                    require(result.station.id == station.id) { "Wrong forecast point" }
-                    atomic(File(directory, "forecast-${station.id}.kmz"), bytes)
-                    return result
+                    return ForecastDownload.latest(
+                        station,
+                        download = {
+                            Http.bytes(
+                                "${Http.WEATHER}local_forecasts/mos/MOSMIX_L/single_stations/${station.id}/kml/MOSMIX_L_LATEST_${station.id}.kmz",
+                                3000000,
+                            )
+                        },
+                    ) { bytes ->
+                        val file = File(directory, "forecast-${station.id}.kmz")
+                        AtomicFiles.write(file, bytes)
+                        forecastCache.wrote(file, ::historyExpiry)
+                    }
                 }
 
                 override fun earlier(station: Station, dayStart: Long, online: Boolean): Forecast? {
@@ -189,31 +270,28 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
                             file.inputStream().use { Mosmix.parseKmz(it) }
                         }
                             .getOrNull()
-                        if (cached?.station?.id == station.id && cached.issue == issue)
+                        if (cached?.station?.id == station.id && cached.issue == issue) {
+                            forecastCache.read(file)
                             return cached
+                        }
                     }
                     if (!online || !this@Repository.online || closed.get()) return null
-                    val bytes =
-                        Http.bytes(
-                            "${Http.WEATHER}local_forecasts/mos/MOSMIX_L/single_stations/${station.id}/kml/$name",
-                            3000000,
-                        )
-                    val result = Mosmix.parseKmz(bytes.inputStream())
-                    require(result.station.id == station.id && result.issue == issue) {
-                        "Wrong historical forecast"
+                    return ForecastDownload.historical(
+                        station,
+                        issue,
+                        download = {
+                            Http.bytes(
+                                "${Http.WEATHER}local_forecasts/mos/MOSMIX_L/single_stations/${station.id}/kml/$name",
+                                3000000,
+                            )
+                        },
+                    ) { bytes ->
+                        AtomicFiles.write(file, bytes)
+                        forecastCache.wrote(file, ::historyExpiry)
                     }
-                    atomic(file, bytes)
-                    directory
-                        .listFiles()
-                        ?.filter {
-                            it.name.startsWith("MOSMIX_L_") &&
-                                System.currentTimeMillis() - it.lastModified() > 3 * 86400000L
-                        }
-                        ?.forEach { it.delete() }
-                    return result
                 }
             },
-            { System.currentTimeMillis() },
+            { AppPlatform.now() },
         )
     }
 
@@ -228,6 +306,7 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
             else Reading(message = "Locating nearest DWD station", refreshing = true)
         changed()
         workers.execute {
+            forecastCache.prune(::historyExpiry)
             forecastLookup.load(
                 p,
                 if (retain) previous else Reading(),
@@ -261,41 +340,33 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
         select(place)
     }
 
+    private fun decodesRadar(file: File): Boolean {
+        val image = android.graphics.BitmapFactory.decodeFile(file.path) ?: return false
+        image.recycle()
+        return true
+    }
+
     private fun loadRadarCache() {
         radarBusy = true
         workers.execute {
             runCatching {
-                val file = File(directory, "radar.json")
-                val j = JSONObject(file.readText())
-                val a = j.getJSONArray("frames")
-                val frames =
-                    (0 until a.length()).map { i ->
-                        val f = a.getJSONObject(i)
-                        val grid =
-                            RadarGrid(
-                                f.getInt("w"),
-                                f.getInt("h"),
-                                f.getDouble("left"),
-                                f.getDouble("top"),
-                                f.getDouble("dx"),
-                                f.getDouble("dy"),
-                            )
-                        val path = File(directory, f.getString("file"))
-                        require(path.exists())
-                        RadarFrame(
-                            f.getLong("time"),
-                            f.getLong("issue"),
-                            f.getInt("lead"),
-                            grid,
-                            path.path,
-                        )
-                    }
-                require(frames.isNotEmpty())
-                Triple(
-                    RadarSequence(frames, j.getLong("issue"), j.getBoolean("historyComplete")),
-                    file.lastModified(),
-                    file,
-                )
+                val manifest = File(directory, "radar.json")
+                val time = manifest.lastModified()
+                val cached = RadarCache.read(directory)
+                cached.invalid.forEach { it.delete() }
+                val sequence =
+                    cached.sequence
+                        ?: run {
+                            manifest.delete()
+                            error("Radar cache is invalid or incompatible")
+                        }
+                val undecodable = sequence.frames.map { File(it.file) }.filterNot(::decodesRadar)
+                if (undecodable.isNotEmpty()) {
+                    undecodable.forEach { it.delete() }
+                    manifest.delete()
+                    error("Radar cache contains an undecodable image")
+                }
+                Triple(sequence, time, manifest)
             }
                 .getOrNull()
                 ?.let { (seq, time, _) ->
@@ -330,6 +401,7 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
         workers.execute {
             try {
                 check(online) { "Offline" }
+                AtomicFiles.cleanup(directory, AppPlatform.now())
                 val frames = mutableListOf<RadarFrame>()
                 fun decode(entry: Tar.Entry): RadarFrame {
                     val m =
@@ -345,7 +417,8 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
                     val dest = File(directory, "rv-$issue-$lead.png")
                     val pixels = Odim.decode(entry.bytes)
                     require(pixels.time == issue + lead * 60000L) { "DWD frame time mismatch" }
-                    if (!dest.exists()) {
+                    if (!RadarCache.reusable(dest, pixels.grid) || !decodesRadar(dest)) {
+                        dest.delete()
                         val bitmap =
                             Bitmap.createBitmap(
                                 pixels.colors,
@@ -356,7 +429,7 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
                         try {
                             val out = ByteArrayOutputStream()
                             check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, out))
-                            atomic(dest, out.toByteArray())
+                            AtomicFiles.write(dest, out.toByteArray())
                         } finally {
                             bitmap.recycle()
                         }
@@ -408,30 +481,9 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
                         issue,
                         historyComplete,
                     )
-                val a = JSONArray()
-                sequence.frames.forEach { f ->
-                    a.put(
-                        JSONObject()
-                            .put("time", f.time)
-                            .put("issue", f.issue)
-                            .put("lead", f.lead)
-                            .put("file", File(f.file).name)
-                            .put("w", f.grid.width)
-                            .put("h", f.grid.height)
-                            .put("left", f.grid.left)
-                            .put("top", f.grid.top)
-                            .put("dx", f.grid.dx)
-                            .put("dy", f.grid.dy)
-                    )
-                }
-                atomic(
+                AtomicFiles.write(
                     File(directory, "radar.json"),
-                    JSONObject()
-                        .put("issue", issue)
-                        .put("historyComplete", historyComplete)
-                        .put("frames", a)
-                        .toString()
-                        .toByteArray(),
+                    RadarCache.encode(sequence, historyComplete).toByteArray(),
                 )
                 val keep = sequence.frames.map { File(it.file).name }.toSet()
                 directory
@@ -439,7 +491,7 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
                     ?.filter {
                         it.name.startsWith("rv-") &&
                             it.name !in keep &&
-                            System.currentTimeMillis() - it.lastModified() > 3600000
+                            AppPlatform.now() - it.lastModified() > 3600000
                     }
                     ?.forEach { it.delete() }
                 post {
@@ -447,7 +499,7 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
                     val stale =
                         issueFreshness(
                             issue,
-                            System.currentTimeMillis(),
+                            AppPlatform.now(),
                             RADAR_MAX_AGE,
                             online,
                             historyComplete,
@@ -456,7 +508,7 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
                         Reading(
                             sequence,
                             if (stale) Freshness.STALE else Freshness.LIVE,
-                            System.currentTimeMillis(),
+                            AppPlatform.now(),
                             when {
                                 !historyComplete ->
                                     "Some observed frames unavailable · gaps are marked"
@@ -477,7 +529,7 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
     }
 
     fun age() {
-        val now = System.currentTimeMillis()
+        val now = AppPlatform.now()
         forecast =
             forecast.aged(
                 forecast.data?.issue,

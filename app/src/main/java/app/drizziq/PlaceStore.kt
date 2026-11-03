@@ -21,24 +21,31 @@ private class AndroidPlacePreferences(context: Context) : PlacePreferences {
 class PlaceStore(private val prefs: PlacePreferences) {
     constructor(context: Context) : this(AndroidPlacePreferences(context))
 
-    private fun json(p: Place) =
-        JSONObject()
+    private fun json(p: Place): JSONObject {
+        val zone = requireNotNull(Zones.canonical(p.zone)) { "Invalid time zone" }
+        return JSONObject()
             .put("label", p.label)
             .put("lat", p.lat)
             .put("lon", p.lon)
-            .put("zone", p.zone)
+            .put("zone", zone)
             .put("geocodeId", p.geocodeId)
             .put("geocodeLabelEdited", p.geocodeLabelEdited)
+    }
 
-    private fun place(j: JSONObject) =
-        Place(
+    private fun place(j: JSONObject): Place {
+        val zone =
+            requireNotNull(Zones.canonical(j.optString("zone", "Europe/Berlin"))) {
+                "Invalid time zone"
+            }
+        return Place(
             j.getString("label"),
             j.getDouble("lat"),
             j.getDouble("lon"),
-            j.optString("zone", "Europe/Berlin"),
+            zone,
             (j.opt("geocodeId") as? String)?.takeIf { it.isNotBlank() },
             j.optBoolean("geocodeLabelEdited", false),
         )
+    }
 
     fun selected(): Place = runCatching {
         place(JSONObject(prefs.get("selected")!!))
@@ -57,17 +64,27 @@ class PlaceStore(private val prefs: PlacePreferences) {
         commit("selected", json(p).toString())
     }
 
-    fun favourites(): List<Place> = runCatching {
-        val a = JSONArray(prefs.get("favourites") ?: "[]")
-        (0 until a.length()).map { place(a.getJSONObject(it)) }
+    fun favourites(): List<Place> {
+        val a =
+            runCatching { JSONArray(prefs.get("favourites") ?: "[]") }.getOrNull()
+                ?: return emptyList()
+        return (0 until a.length()).mapNotNull { i ->
+            runCatching { place(a.getJSONObject(i)) }.getOrNull()
+        }
     }
-        .getOrDefault(emptyList())
 
     fun save(p: Place) {
         write(favourites().filterNot { it.lat == p.lat && it.lon == p.lon } + p)
     }
 
-    fun delete(p: Place) = write(favourites().filterNot { it == p })
+    /** False when the commit failed and the previous list was restored; the caller can retry. */
+    fun delete(p: Place): Boolean =
+        try {
+            write(favourites().filterNot { it == p })
+            true
+        } catch (error: Exception) {
+            false
+        }
 
     private fun write(all: List<Place>) {
         val a = JSONArray()

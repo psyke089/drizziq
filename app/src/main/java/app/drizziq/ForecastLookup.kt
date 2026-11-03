@@ -28,6 +28,17 @@ class ForecastLookup(
             if (isCurrent()) publish(reading)
         }
         if (!isCurrent()) return
+        val zone = Zones.canonical(place.zone)
+        if (zone == null) {
+            resolved(null)
+            emit(
+                Reading(
+                    state = Freshness.ERROR,
+                    message = "Invalid time zone · choose another place",
+                )
+            )
+            return
+        }
         val index =
             try {
                 catalogue()
@@ -51,9 +62,9 @@ class ForecastLookup(
         var retained = previous.takeIf { it.data?.station?.id == hit.station.id } ?: Reading()
         val dayStart =
             java.time.Instant.ofEpochMilli(clock())
-                .atZone(java.time.ZoneId.of(place.zone))
+                .atZone(java.time.ZoneId.of(zone))
                 .toLocalDate()
-                .atStartOfDay(java.time.ZoneId.of(place.zone))
+                .atStartOfDay(java.time.ZoneId.of(zone))
                 .toInstant()
                 .toEpochMilli()
         fun withHistory(forecast: Forecast, fetch: Boolean): Forecast {

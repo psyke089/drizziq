@@ -24,9 +24,7 @@ import java.util.concurrent.Future
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
-/**
- * Activity-owned place-choice interaction. Only explicit actions submit city text or acquire a fix.
- */
+/** Activity-owned place choice. Valid city text is submitted after a short typing pause. */
 class PlaceChoices(
     private val activity: Activity,
     private val zones: ZoneLookup,
@@ -38,7 +36,7 @@ class PlaceChoices(
     private val generation = RequestGeneration()
     private val transport = GeocodeHttp()
     private val search =
-        CitySearch(transport, { SystemClock.elapsedRealtime() }, { System.currentTimeMillis() })
+        CitySearch(transport, { SystemClock.elapsedRealtime() }, { AppPlatform.now() })
     private val executor =
         ThreadPoolExecutor(
             1,
@@ -50,6 +48,7 @@ class PlaceChoices(
         )
     private var future: Future<*>? = null
     private var dialog: AlertDialog? = null
+    private var searchDebounce: SearchDebounce? = null
     private var foreground = false
     private var closed = false
     private var permissionRequest: Pair<Int, Int>? = null
@@ -73,6 +72,7 @@ class PlaceChoices(
     fun isCurrent(token: Int) = !closed && foreground && generation.isCurrent(token)
 
     fun invalidate(dismiss: Boolean = true): Int {
+        searchDebounce?.cancel()
         val token = generation.next()
         future?.cancel(true)
         future = null
@@ -151,15 +151,12 @@ class PlaceChoices(
         val rows = activity.column()
         body.addView(rows)
         val d =
-            AlertDialog.Builder(activity)
-                .setTitle(R.string.city_search_title)
-                .setView(ScrollView(activity).apply { addView(body) })
-                .setNegativeButton("Cancel") { _, _ -> cancel(token) }
-                .setPositiveButton("Search", null)
-                .setNeutralButton("Refresh", null)
-                .create()
+            activity.placeDialog(
+                AlertDialog.Builder(activity).setView(ScrollView(activity).apply { addView(body) }),
+                activity.getText(R.string.city_search_title),
+            )
         track(d) { token }
-        fun submit(refresh: Boolean) {
+        fun submit() {
             if (closed || !foreground) return
             val query =
                 try {
@@ -176,22 +173,18 @@ class PlaceChoices(
             rows.removeAllViews()
             status.setText(R.string.city_search_waiting)
             status.setTextColor(Hud.muted)
-            d.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
-            d.getButton(AlertDialog.BUTTON_NEUTRAL).isEnabled = false
             val connected = online()
             future = executor.submit {
                 val result =
                     search.search(
                         query,
-                        refresh,
+                        false,
                         connected,
                         { generation.isCurrent(request) },
                         { action -> generation.runIfCurrent(request, action) },
                     )
                 handler.post {
                     if (!isCurrent(request)) return@post
-                    d.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
-                    d.getButton(AlertDialog.BUTTON_NEUTRAL).isEnabled = true
                     val candidates =
                         when (result) {
                             is SearchResult.Results -> {
@@ -209,6 +202,7 @@ class PlaceChoices(
                             }
                             is SearchResult.Empty -> {
                                 status.setText(R.string.city_search_empty)
+                                status.setTextColor(Hud.muted)
                                 emptyList()
                             }
                             is SearchResult.Failure -> {
@@ -261,6 +255,17 @@ class PlaceChoices(
                 }
             }
         }
+        val debounce =
+            SearchDebounce(
+                { delay, action ->
+                    val task = Runnable { action() }
+                    handler.postDelayed(task, delay)
+                    Cancel { handler.removeCallbacks(task) }
+                },
+                { token = invalidate(false) },
+                { submit() },
+            )
+        searchDebounce = debounce
         input.addTextChangedListener(
             object : TextWatcher {
                 override fun beforeTextChanged(
@@ -272,13 +277,10 @@ class PlaceChoices(
 
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                     input.error = null
-                    token = invalidate(false)
                     rows.removeAllViews()
                     status.setText(R.string.city_search_hint)
-                    if (d.isShowing) {
-                        d.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
-                        d.getButton(AlertDialog.BUTTON_NEUTRAL).isEnabled = true
-                    }
+                    status.setTextColor(Hud.muted)
+                    debounce.edited(s?.toString().orEmpty())
                 }
 
                 override fun afterTextChanged(s: Editable?) {}
@@ -287,15 +289,12 @@ class PlaceChoices(
         input.setOnEditorActionListener { _, action, event ->
             if (
                 action == EditorInfo.IME_ACTION_SEARCH ||
-                    (event?.keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_UP)
+                    (event?.keyCode == KeyEvent.KEYCODE_ENTER &&
+                        event.action == KeyEvent.ACTION_DOWN)
             ) {
-                submit(false)
+                debounce.immediate(input.text.toString())
                 true
             } else false
-        }
-        d.setOnShowListener {
-            d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { submit(false) }
-            d.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener { submit(true) }
         }
         d.show()
     }
@@ -322,12 +321,12 @@ class PlaceChoices(
             if (permanent) denied(token, true)
             else {
                 val d =
-                    AlertDialog.Builder(activity)
-                        .setTitle("Current location")
-                        .setMessage(R.string.location_purpose)
-                        .setNegativeButton("Cancel") { _, _ -> cancel(token) }
-                        .setPositiveButton("Continue", null)
-                        .create()
+                    activity.placeDialog(
+                        AlertDialog.Builder(activity)
+                            .setMessage(R.string.location_purpose)
+                            .setPositiveButton("Continue", null),
+                        "Current location",
+                    )
                 track(d, token)
                 d.setOnShowListener {
                     d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
@@ -384,11 +383,9 @@ class PlaceChoices(
     private fun denied(token: Int, permanent: Boolean) {
         val builder =
             AlertDialog.Builder(activity)
-                .setTitle("Location access")
                 .setMessage(
                     if (permanent) R.string.location_permanent_denial else R.string.location_denied
                 )
-                .setNegativeButton("Close") { _, _ -> cancel(token) }
         if (permanent)
             builder.setPositiveButton("App settings") { _, _ ->
                 cancel(token)
@@ -399,18 +396,18 @@ class PlaceChoices(
                     )
                 )
             }
-        replaceDialog(builder.create(), token)
+        replaceDialog(activity.placeDialog(builder, "Location access"), token)
     }
 
     private fun acquire(token: Int) {
         if (!isCurrent(token)) return
         val d =
-            AlertDialog.Builder(activity)
-                .setTitle("Current location")
-                .setMessage(R.string.location_progress)
-                .setNegativeButton("Cancel") { _, _ -> cancel(token) }
-                .setPositiveButton("Retry", null)
-                .create()
+            activity.placeDialog(
+                AlertDialog.Builder(activity)
+                    .setMessage(R.string.location_progress)
+                    .setPositiveButton("Retry", null),
+                "Current location",
+            )
         replaceDialog(d, token)
         d.getButton(AlertDialog.BUTTON_POSITIVE).visibility = View.GONE
         d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { currentLocation() }

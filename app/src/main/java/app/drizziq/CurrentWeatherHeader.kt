@@ -9,15 +9,12 @@ import android.widget.LinearLayout
 /** Compact shared weather summary; every field keeps its slot while data is unavailable. */
 class CurrentWeatherHeader(context: Context) : LinearLayout(context) {
     private val temperature =
-        context.label("—", 42f).apply {
+        FittingTemperature(context).apply {
+            text = "—"
+            textSize = 42f
+            setTextColor(Hud.ink)
+            includeFontPadding = false
             tag = "header-temperature"
-            if (android.os.Build.VERSION.SDK_INT >= 26)
-                setAutoSizeTextTypeUniformWithConfiguration(
-                    32,
-                    42,
-                    1,
-                    android.util.TypedValue.COMPLEX_UNIT_SP,
-                )
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             maxLines = 1
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
@@ -73,11 +70,11 @@ class CurrentWeatherHeader(context: Context) : LinearLayout(context) {
         if (temp == null) {
             temperature.setText(R.string.header_missing_value)
             temperature.contentDescription =
-                context.getString(R.string.header_temperature_unavailable)
+                context.hudString(R.string.header_temperature_unavailable)
         } else {
-            temperature.text = context.getString(R.string.header_temperature, temp)
+            temperature.text = context.hudString(R.string.header_temperature, temp)
             temperature.contentDescription =
-                context.getString(R.string.header_temperature_description, temp, state.name)
+                context.hudString(R.string.header_temperature_description, temp, state.name)
         }
         temperature.setTextColor(
             if (temp == null) Hud.muted
@@ -85,12 +82,12 @@ class CurrentWeatherHeader(context: Context) : LinearLayout(context) {
         )
         condition.bind(hour)
         condition.contentDescription =
-            if (hour == null) context.getString(R.string.header_condition_unavailable)
+            if (hour == null) context.hudString(R.string.header_condition_unavailable)
             else
-                context.getString(
+                context.hudString(
                     R.string.header_condition_description,
                     weatherLabel(hour.condition)
-                        ?: context.getString(R.string.header_condition_unavailable),
+                        ?: context.hudString(R.string.header_condition_unavailable),
                     Times.format(hour.time, "EEE dd MMM HH:mm z", zone),
                     state.name,
                 )
@@ -101,11 +98,11 @@ class CurrentWeatherHeader(context: Context) : LinearLayout(context) {
         if (windIcon != null) windIntensity.iconName = windIcon
         if (speed == null) {
             wind.setText(R.string.header_missing_value)
-            wind.contentDescription = context.getString(R.string.header_wind_unavailable)
+            wind.contentDescription = context.hudString(R.string.header_wind_unavailable)
         } else {
-            wind.text = context.getString(R.string.header_wind_speed, speed)
+            wind.text = context.hudString(R.string.header_wind_speed, speed)
             wind.contentDescription =
-                context.getString(R.string.header_wind_description, speed, state.name)
+                context.hudString(R.string.header_wind_description, speed, state.name)
         }
         direction.removeAllViews()
         val bearing = hour?.get("DD")?.takeIf { it.isFinite() && it in 0.0..360.0 }
@@ -114,5 +111,24 @@ class CurrentWeatherHeader(context: Context) : LinearLayout(context) {
                 WindDirectionGlyph(context, bearing),
                 FrameLayout.LayoutParams(-1, -1),
             )
+    }
+}
+
+/** Fits the complete value on API 24+ without a support-library dependency or clipped digits. */
+@android.annotation.SuppressLint("ViewConstructor")
+private class FittingTemperature(context: Context) : android.widget.TextView(context) {
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        val available = width - paddingLeft - paddingRight
+        if (available <= 0 || text.isEmpty()) return
+        val maximum = 42f * resources.displayMetrics.scaledDensity
+        val previous = paint.textSize
+        paint.textSize = maximum
+        val measured = paint.measureText(text, 0, text.length)
+        paint.textSize = previous
+        if (measured <= 0f) return
+        val fitted = minOf(maximum, maximum * available / measured)
+        if (kotlin.math.abs(textSize - fitted) > .5f)
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, fitted)
     }
 }

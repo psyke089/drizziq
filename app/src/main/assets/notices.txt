@@ -2,13 +2,15 @@ Drizziq — MIT licence, copyright 2026 k4r.
 
 Weather data source: Quelle: Deutscher Wetterdienst (DWD), https://opendata.dwd.de/weather/ . Licence: CC BY 4.0, https://creativecommons.org/licenses/by/4.0/ . Values are converted to displayed units; hourly values are grouped into daily summaries, and radar pixels are coloured and projected. Missing readings are omitted or hatched. DWD reuse terms: https://www.dwd.de/copyright .
 
-City search: Open-Meteo, https://open-meteo.com/ , and GeoNames, https://www.geonames.org/ . Place metadata: CC BY 4.0, https://creativecommons.org/licenses/by/4.0/ . Licence: https://open-meteo.com/en/licence . Compact labels are assembled from returned names/regions/countries; user-edited labels are marked. Free API for non-commercial use only, subject to quotas: https://open-meteo.com/en/terms . Only explicit search text is submitted; memory cache can be cleared in Places. Optional foreground device location resolves to stations locally without reverse geocoding. Android providers may use network services. Selected positions and favourites are stored as private snapshots, not location history.
+Optional radar overlays: DWD WMS, https://maps.dwd.de/geoserver/dwd/wms . Source: Deutscher Wetterdienst; data and service under CC BY 4.0, https://www.dwd.de/copyright . Satellite imagery uses infrared data from EUMETSAT and NOAA; contains modified EUMETSAT Meteosat data 2026. The three-hourly satellite image is context and is not synchronized to individual precipitation radar frames.
+
+City search: Open-Meteo, https://open-meteo.com/ , and GeoNames, https://www.geonames.org/ . Place metadata: CC BY 4.0, https://creativecommons.org/licenses/by/4.0/ . Licence: https://open-meteo.com/en/licence . Compact labels are assembled from returned names/regions/countries; user-edited labels retain provenance. Free API for non-commercial use only, subject to quotas: https://open-meteo.com/en/terms . Typed text is sent after a 400 ms pause or keyboard submission; memory cache can be cleared in Places. Optional foreground device location resolves to stations locally without reverse geocoding. Android providers may use network services. Selected positions and favourites are stored as private snapshots, not location history.
 
 Hourly precipitation probability is DWD R101 (>0.1 mm in the preceding hour); gusts are DWD FX1 (preceding-hour maximum), converted to km/h. Missing values remain unavailable. Sunrise/sunset are calculated locally using NOAA/Meeus-style solar mathematics and a standard -0.833 degree horizon; no astronomy service receives your coordinates. Times are estimates without terrain/building/cloud obstruction: https://gml.noaa.gov/grad/solcalc/calcdetails.html .
 
-Basemap and geographical timezone data © OpenStreetMap contributors: https://www.openstreetmap.org/copyright . Timezone boundary database: timezone-boundary-builder, https://github.com/evansiroky/timezone-boundary-builder . Database licence: Open Database License (ODbL) 1.0, https://opendatacommons.org/licenses/odbl/1-0/ . The extracted database source is distributed in this repository: https://codeberg.org/k4r/drizziq .
+Basemap and geographical timezone data © OpenStreetMap contributors: https://www.openstreetmap.org/copyright . Timezone boundary database: timezone-boundary-builder, https://github.com/evansiroky/timezone-boundary-builder . Database licence: Open Database License (ODbL) 1.0, https://opendatacommons.org/licenses/odbl/1-0/ . The extracted database source is available under ODbL in the public source mirror: https://github.com/psyke089/drizziq/tree/main/app/src/main/assets (timezones.tree and timezones.txt).
 
-Timezone lookup: The Dark Sky Company, LLC and PhotoStructure, CC0 1.0: https://creativecommons.org/publicdomain/zero/1.0/ . Time zones are approximate at borders and can be overridden.
+Timezone lookup: The Dark Sky Company, LLC and PhotoStructure, CC0 1.0: https://creativecommons.org/publicdomain/zero/1.0/ . Pinned upstream revision 6051e7e2fe8b754e23d40aff0120cf9b38bde608 (package 11.7.0), derived from timezone-boundary-builder: https://github.com/photostructure/tz-lookup/commit/6051e7e2fe8b754e23d40aff0120cf9b38bde608 . Time zones are approximate at borders and can be overridden.
 
 Weather icon artwork: created from scratch by the author for a personal todo project and adapted for Drizziq; copyright 2026 k4r, distributed under the MIT licence below. Other app icons are locally authored and use the same licence.
 
@@ -19,7 +21,7 @@ Third-party components:
 - lz4-java 1.11.1: Apache License 2.0.
 - SLF4J API 2.0.18: MIT licence, copyright QOS.ch.
 - jHDF 0.13.0: MIT licence, copyright James Mudd.
-- Android desugar JDK libraries 2.1.5: GPL version 2 with the Classpath Exception, copyright Oracle and contributors. Corresponding source: https://github.com/google/desugar_jdk_libs/tree/2.1.5 .
+- Android desugar JDK libraries 2.1.5: GPL version 2 with the Classpath Exception, copyright Oracle and contributors. Corresponding source: https://github.com/google/desugar_jdk_libs (the published 2.1.5 artifact POM names this repository; no 2.1.5 source tag is published).
 
 Full licence texts follow.
 

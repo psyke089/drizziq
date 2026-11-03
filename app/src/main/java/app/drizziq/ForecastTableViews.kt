@@ -13,6 +13,7 @@ class WeekDayLabel(context: Context, weekday: String, date: String) : LinearLayo
     init {
         orientation = VERTICAL
         gravity = Gravity.CENTER
+        setPadding(context.dp(4), 0, context.dp(4), 0)
         addView(
             context.label(weekday, 15f, Hud.cyan, true).apply {
                 tag = "week-weekday"

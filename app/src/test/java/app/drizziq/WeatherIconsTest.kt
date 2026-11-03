@@ -5,6 +5,42 @@ import org.junit.Test
 
 class WeatherIconsTest {
     @Test
+    fun weatherIcons_remainingWmoConditions_useExistingFamiliesAndKeepUnknownFallback() {
+        for ((code, family) in
+            mapOf(
+                4 to "foggy",
+                17 to "thunderstorm",
+                18 to "windy-strong",
+                20 to "drizzle",
+                21 to "rain-medium",
+                22 to "snow-medium",
+                27 to "snow-grains",
+                31 to "windy-strong",
+                38 to "snow-heavy",
+                44 to "foggy",
+                46 to "foggy",
+                52 to "drizzle-light",
+                54 to "drizzle",
+                59 to "rain-heavy",
+                62 to "rain-light",
+                64 to "rain-medium",
+                72 to "snow-light",
+                74 to "snow-medium",
+                78 to "snow-grains",
+                87 to "snow-grains",
+                90 to "snow-grains",
+                91 to "rain-light",
+                94 to "sleet-heavy",
+                98 to "thunderstorm-heavy",
+            )) {
+            assertEquals("code $code", "weather-$family", weatherIconName(code))
+        }
+        for (code in 0..99) assertNotEquals("code $code", "weather-unknown", weatherIconName(code))
+        assertEquals("weather-unknown", weatherIconName(-1))
+        assertEquals("weather-unknown", weatherIconName(100))
+    }
+
+    @Test
     fun weatherIcons_explicitIntensityAndFreezingMixedConditions_keepDwdMeaning() {
         val expected =
             mapOf(

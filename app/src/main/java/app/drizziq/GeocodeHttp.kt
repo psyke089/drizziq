@@ -7,9 +7,8 @@ import java.util.concurrent.atomic.AtomicReference
 import java.util.zip.GZIPInputStream
 
 /** Search-only HTTPS transport: every redirect must remain on the exact geocoding endpoint. */
-class GeocodeHttp(
-    private val open: (URL) -> HttpURLConnection = { it.openConnection() as HttpURLConnection }
-) : GeocodeTransport {
+class GeocodeHttp(private val open: (URL) -> HttpURLConnection = AppPlatform::open) :
+    GeocodeTransport {
     private val connection = AtomicReference<HttpURLConnection?>()
 
     override fun fetch(address: String): GeocodeReply = Http.downloads.track { request(address) }

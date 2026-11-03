@@ -21,7 +21,7 @@ class ForecastDetailsCard(
         pad(16)
         background = panel()
         val forecast = requireNotNull(reading.data)
-        val now = System.currentTimeMillis()
+        val now = AppPlatform.now()
         val heading = context.row()
         heading.addView(
             context.label(forecast.station.name, 15f).apply {
@@ -46,7 +46,7 @@ class ForecastDetailsCard(
         addView(
             context
                 .label(
-                    context.getString(
+                    context.hudString(
                         R.string.details_station_id,
                         forecast.station.id,
                         forecast.station.lat,
@@ -58,7 +58,7 @@ class ForecastDetailsCard(
                 )
                 .apply {
                     contentDescription =
-                        context.getString(
+                        context.hudString(
                             R.string.details_station_description,
                             forecast.station.id,
                             forecast.station.lat,
@@ -83,27 +83,27 @@ class ForecastDetailsCard(
             )
         }
         val distance =
-            context.getString(R.string.details_distance, forecast.station.distance(place))
+            context.hudString(R.string.details_distance, forecast.station.distance(place))
         metric(
-            context.getString(R.string.details_distance_label),
-            context.getString(R.string.details_distance_value, forecast.station.distance(place)),
+            context.hudString(R.string.details_distance_label),
+            context.hudString(R.string.details_distance_value, forecast.station.distance(place)),
             distance,
         )
         val elevation =
             forecast.station.elevation
                 ?.takeIf { it.isFinite() }
-                ?.let { context.getString(R.string.details_elevation, it) } ?: "—"
+                ?.let { context.hudString(R.string.details_elevation, it) } ?: "—"
         metric(
-            context.getString(R.string.details_elevation_label),
+            context.hudString(R.string.details_elevation_label),
             elevation,
-            context.getString(R.string.details_elevation_description, elevation),
+            context.hudString(R.string.details_elevation_description, elevation),
         )
         forecast.current(now)?.pressure?.let {
-            val pressure = context.getString(R.string.details_pressure, it)
+            val pressure = context.hudString(R.string.details_pressure, it)
             metric(
-                context.getString(R.string.details_pressure_label),
+                context.hudString(R.string.details_pressure_label),
                 pressure,
-                context.getString(R.string.details_pressure_description, pressure),
+                context.hudString(R.string.details_pressure_description, pressure),
             )
         }
         addView(metrics)
@@ -127,14 +127,14 @@ class ForecastDetailsCard(
             )
             addView(row)
         }
-        info(context.getString(R.string.details_timezone), place.zone)
-        reading.fetched?.let { info(context.getString(R.string.details_updated), time(it)) }
+        info(context.hudString(R.string.details_timezone), place.zone)
+        reading.fetched?.let { info(context.hudString(R.string.details_updated), time(it)) }
         space(3)
         addView(
             context
                 .action(if (reading.refreshing) "REFRESHING…" else "REFRESH DWD") { refresh() }
                 .apply { isEnabled = !reading.refreshing }
         )
-        contentDescription = context.getString(R.string.details_accessibility, reading.state.name)
+        contentDescription = context.hudString(R.string.details_accessibility, reading.state.name)
     }
 }

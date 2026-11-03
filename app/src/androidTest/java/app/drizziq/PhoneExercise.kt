@@ -11,11 +11,52 @@ import android.view.accessibility.AccessibilityNodeInfo
 
 /** Exercises real native UI on an attached device, without external test libraries. */
 class PhoneExercise : Instrumentation() {
+    private val suitePhases =
+        setOf(
+            "navigation",
+            "layout",
+            "lifecycle",
+            "forecast",
+            "radar",
+            "places-search",
+            "viewport-save",
+            "viewport-restore",
+        )
+    private val focusedPhases =
+        setOf(
+            "lint-resources",
+            "svg-icons",
+            "hourly-refresh",
+            "day-forecast",
+            "header-weather",
+            "forecast-status",
+            "copy-cleanup",
+            "lifecycle-hardening",
+            "radar-corruption",
+        )
+    private val integrationPhases = setOf("places-integration")
+    private val fullPhases = setOf("main", "persistence", "offline", "stopped-network", "restore")
+    private val diagnosticPhases =
+        setOf("recenter-probe", "geocoding-probe", "station-benchmark", "radar-gestures")
+    private val knownPhases =
+        suitePhases +
+            focusedPhases +
+            integrationPhases +
+            fullPhases +
+            diagnosticPhases +
+            setOf("fixture-forecast", "fixture-states", "fixture-ui")
     private var phase = "main"
+    private var fixture = false
+    private val appContext
+        get() = if (fixture) PhoneFixtures.context(targetContext) else targetContext
 
     override fun onCreate(arguments: Bundle?) {
         super.onCreate(arguments)
         phase = arguments?.getString("phase") ?: "main"
+        fixture = arguments?.getString("fixture") == "true"
+        if (fixture)
+            PhoneFixtures.install(targetContext, context.assets, phase == "viewport-restore")
+        else AppPlatform.reset()
         start()
     }
 
@@ -34,6 +75,14 @@ class PhoneExercise : Instrumentation() {
         // UI can contain a device-position snapshot; do not dump coordinates or queries to logs.
         error("Timed out: $description")
     }
+
+    /** Runs a command through the instrumentation's shell identity and returns its output. */
+    private fun shell(command: String): String =
+        android.os.ParcelFileDescriptor.AutoCloseInputStream(
+                uiAutomation.executeShellCommand(command)
+            )
+            .bufferedReader()
+            .use { it.readText() }
 
     private fun has(text: String) =
         nodes().any {
@@ -66,6 +115,14 @@ class PhoneExercise : Instrumentation() {
                 },
             )
         )
+    }
+
+    private fun submitSearch() {
+        val editor =
+            nodes().first { it.isEditable && it.contentDescription?.toString() == "CITY NAME" }
+        if (!editor.isFocused) check(editor.performAction(AccessibilityNodeInfo.ACTION_FOCUS))
+        sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_ENTER)
+        waitForIdleSync()
     }
 
     private fun drag(x1: Float, y1: Float, x2: Float, y2: Float) {
@@ -130,8 +187,8 @@ class PhoneExercise : Instrumentation() {
             uiAutomation.injectInputEvent(event, true)
             event.recycle()
         }
-        val startDistance = targetContext.dp(if (reverse) 110 else 32).toFloat()
-        val endDistance = targetContext.dp(if (reverse) 32 else 110).toFloat()
+        val startDistance = appContext.dp(if (reverse) 110 else 32).toFloat()
+        val endDistance = appContext.dp(if (reverse) 32 else 110).toFloat()
         send(MotionEvent.ACTION_DOWN, 1, startDistance)
         send(MotionEvent.ACTION_POINTER_DOWN or (1 shl 8), 2, startDistance)
         for (i in 1..20) {
@@ -221,19 +278,207 @@ class PhoneExercise : Instrumentation() {
     override fun onStart() {
         val result = Bundle()
         try {
+            check(phase in knownPhases) { "Unknown phase: $phase" }
+            result.putString("phase", phase)
             val activity =
                 startActivitySync(
-                    Intent(targetContext, MainActivity::class.java)
+                    Intent(appContext, MainActivity::class.java)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
-            waitFor("initial app") { has("PLACES") }
+            waitFor("initial app") {
+                var focused = false
+                runOnMainSync { focused = activity.hasWindowFocus() }
+                focused && has("PLACES")
+            }
             when (phase) {
+                "fixture-forecast" -> {
+                    waitFor("fixture forecast", 10000) { has("Temperature ") }
+                    runOnMainSync {
+                        val date =
+                            activity.window.decorView.findViewWithTag<android.widget.TextView>(
+                                "today-date"
+                            )
+                        check(date.text.toString() == "Thursday, 22 Oct 2026") {
+                            "Forecast must use the isolated fixture clock"
+                        }
+                    }
+                    result.putString("checks", "fixed fixture clock and real forecast Views")
+                }
+                "fixture-ui" -> {
+                    check(fixture)
+                    waitFor("fixture table") { has("Temperature ") }
+                    fun views(root: android.view.View): List<android.view.View> =
+                        listOf(root) +
+                            if (root is android.view.ViewGroup)
+                                (0 until root.childCount).flatMap { views(root.getChildAt(it)) }
+                            else emptyList()
+                    var layoutError: String? = null
+                    runOnMainSync {
+                        val all = views(activity.window.decorView)
+                        val hourly = all.filterIsInstance<HourlyForecast>().first()
+                        val box = Rect()
+                        hourly.getGlobalVisibleRect(box)
+                        if (box.left != 0 || box.right != activity.window.decorView.width)
+                            layoutError = "Today table is not full width"
+                        val wind =
+                            hourly.findViewWithTag<android.widget.LinearLayout>("hourly-wind")
+                        val gust =
+                            hourly.findViewWithTag<android.widget.LinearLayout>("hourly-gusts")
+                        if (
+                            wind == null ||
+                                gust == null ||
+                                wind.height != gust.height ||
+                                gust.height != appContext.dp(40)
+                        )
+                            layoutError = "Gust and wind rows are not aligned"
+                        if (all.none { it.contentDescription?.toString() == "Rain unavailable" })
+                            layoutError = "Missing rain does not announce unavailable"
+                        val configuration =
+                            android.content.res.Configuration(appContext.resources.configuration)
+                        configuration.setLocale(java.util.Locale.GERMANY)
+                        val german = appContext.createConfigurationContext(configuration)
+                        val header = CurrentWeatherHeader(german)
+                        header.bind(
+                            Hour(PhoneFixtures.now, mapOf("TTT" to 267.45, "FF" to 2.0)),
+                            Freshness.LIVE,
+                            "UTC",
+                        )
+                        val temperature =
+                            header.findViewWithTag<android.widget.TextView>("header-temperature")
+                        if (!temperature.text.toString().contains("-5.7"))
+                            layoutError = "HUD number followed German locale"
+                    }
+                    check(layoutError == null) { layoutError.orEmpty() }
+                    click("Week")
+                    waitFor("weekly table") { has("Maximum temperature") }
+                    runOnMainSync {
+                        val root = activity.window.decorView
+                        val first = root.findViewWithTag<android.view.ViewGroup>("week-row:0")
+                        val table = first.parent as android.view.View
+                        val rect = Rect()
+                        table.getGlobalVisibleRect(rect)
+                        if (rect.left != 0 || rect.right != root.width)
+                            layoutError = "Week table is not full width"
+                        if (first.getChildAt(0).width < appContext.dp(64))
+                            layoutError = "Week date column too narrow"
+                    }
+                    check(layoutError == null) { layoutError.orEmpty() }
+                    click("Radar")
+                    waitFor("fixture radar timeline") { has("OBSERVED") }
+                    click("Radar layers")
+                    click("Temperature")
+                    waitFor("temperature layer") {
+                        has("2 m TEMP") && has("Source: Deutscher Wetterdienst")
+                    }
+                    click("Radar layers")
+                    click("Clouds")
+                    waitFor("cloud layer") { has("CLOUDS") && has("IR 10.8") }
+                    click("Radar layers")
+                    click("Precipitation only")
+                    waitFor("overlay removed") { !has("IR 10.8") }
+                    result.putString(
+                        "checks",
+                        "full-width tables, gust alignment, missing rain, German locale, radar layer switching",
+                    )
+                }
+                "fixture-states" -> {
+                    check(fixture) { "fixture-states requires fixture=true" }
+                    fun repository(owner: android.app.Activity): Repository =
+                        MainActivity::class
+                            .java
+                            .getDeclaredField("repo")
+                            .apply { isAccessible = true }
+                            .get(owner) as Repository
+                    val repo = repository(activity)
+                    waitFor("fixture live forecast") {
+                        repo.forecast.state == Freshness.LIVE && !repo.forecast.refreshing
+                    }
+                    val retained = requireNotNull(repo.forecast.data)
+                    PhoneFixtures.forecastFailure = true
+                    runOnMainSync { repo.refreshForecast() }
+                    waitFor("failed refresh retains data") {
+                        !repo.forecast.refreshing && repo.forecast.state == Freshness.STALE
+                    }
+                    check(repo.forecast.data == retained)
+                    check(has("STALE") && has("Temperature "))
+                    PhoneFixtures.forecastFailure = false
+                    AppPlatform.connected = false
+                    runOnMainSync {
+                        repo.connection()
+                        repo.refreshRadar()
+                    }
+                    waitFor("offline Today retains forecast") {
+                        repo.forecast.state == Freshness.STALE &&
+                            repo.forecast.data == retained &&
+                            has("STALE") &&
+                            has("Temperature ")
+                    }
+                    click("Radar")
+                    waitFor("fixture offline radar") { has("Offline radar") }
+                    waitFor("fixture requests settle", 5000) { !Http.downloads.active }
+                    val before = PhoneFixtures.requests.get()
+                    runOnMainSync {
+                        repo.refreshForecast()
+                        repo.refreshRadar()
+                    }
+                    waitFor("offline refresh terminal") { !repo.forecast.refreshing }
+                    check(before == PhoneFixtures.requests.get()) {
+                        "Offline issued an HTTP request"
+                    }
+                    AppPlatform.connected = true
+                    runOnMainSync {
+                        repo.connection()
+                        repo.refreshForecast()
+                    }
+                    waitFor("fixture recovery") {
+                        repo.forecast.state == Freshness.LIVE && !repo.forecast.refreshing
+                    }
+                    click("Today")
+                    val gate = java.util.concurrent.CountDownLatch(1)
+                    PhoneFixtures.forecastGate = gate
+                    var recreated: android.app.Activity? = null
+                    try {
+                        runOnMainSync { repo.refreshForecast() }
+                        waitFor("controlled pending refresh") { repo.forecast.refreshing }
+                        val monitor = addMonitor(MainActivity::class.java.name, null, false)
+                        runOnMainSync { activity.recreate() }
+                        recreated =
+                            waitForMonitorWithTimeout(monitor, 10000)
+                                ?: error("Pending refresh recreation failed")
+                        removeMonitor(monitor)
+                        gate.countDown()
+                        waitFor("new instance owns completion") {
+                            repository(requireNotNull(recreated)).forecast.state == Freshness.LIVE
+                        }
+                        check(activity.isDestroyed)
+                    } finally {
+                        gate.countDown()
+                        PhoneFixtures.forecastGate = null
+                    }
+                    val current = requireNotNull(recreated)
+                    PlaceStore(appContext).select(Place("Outside coverage", 0.0, 0.0, "UTC"))
+                    val monitor = addMonitor(MainActivity::class.java.name, null, false)
+                    runOnMainSync { current.recreate() }
+                    val empty =
+                        waitForMonitorWithTimeout(monitor, 10000)
+                            ?: error("Empty-state recreation failed")
+                    removeMonitor(monitor)
+                    waitFor("empty forecast error") {
+                        repository(empty).forecast.state == Freshness.ERROR
+                    }
+                    check(repository(empty).forecast.data == null)
+                    waitFor("error Views") { has("No DWD forecast point within 50 km") }
+                    result.putString(
+                        "checks",
+                        "real Views: failed-refresh retention, offline no-request, recovery, pending recreation, obsolete owner, empty/error",
+                    )
+                }
                 "lint-resources" -> {
                     runOnMainSync {
                         // Keep this map uninitialised for a place, so gestures cannot save a
                         // camera.
-                        val map = RadarMap(targetContext).apply { online = false }
-                        val parent = android.widget.FrameLayout(targetContext)
+                        val map = RadarMap(appContext).apply { online = false }
+                        val parent = android.widget.FrameLayout(appContext)
                         parent.addView(map)
                         map.layout(0, 0, 400, 400)
                         var clicks = 0
@@ -280,14 +525,14 @@ class PhoneExercise : Instrumentation() {
 
                         val hourly =
                             HourlyForecast(
-                                targetContext,
+                                appContext,
                                 listOf(HourlyColumn(Times.parse("2026-10-22T12:00:00Z"), null)),
                                 "UTC",
                                 0,
                             )
                         hourly.measure(
                             android.view.View.MeasureSpec.makeMeasureSpec(
-                                targetContext.dp(320),
+                                appContext.dp(320),
                                 android.view.View.MeasureSpec.EXACTLY,
                             ),
                             android.view.View.MeasureSpec.makeMeasureSpec(
@@ -296,7 +541,7 @@ class PhoneExercise : Instrumentation() {
                             ),
                         )
                         hourly.layout(0, 0, hourly.measuredWidth, hourly.measuredHeight)
-                        check(hourly.getChildAt(0).width == targetContext.dp(40)) {
+                        check(hourly.getChildAt(0).width == appContext.dp(40)) {
                             "Hourly legend must be wider than the old metric rail"
                         }
                         check(
@@ -315,7 +560,7 @@ class PhoneExercise : Instrumentation() {
                                 }
                             }
 
-                        val weekday = WeekDayLabel(targetContext, "Sat", "31 Oct")
+                        val weekday = WeekDayLabel(appContext, "Sat", "31 Oct")
                         val weekdayText =
                             descendants(weekday)
                                 .filterIsInstance<android.widget.TextView>()
@@ -331,7 +576,7 @@ class PhoneExercise : Instrumentation() {
                         var deleted = 0
                         val favourite =
                             FavouriteCard(
-                                targetContext,
+                                appContext,
                                 Place.MUNICH.copy(label = "Test favourite"),
                                 selected = true,
                                 select = { selected++ },
@@ -368,9 +613,8 @@ class PhoneExercise : Instrumentation() {
                     if (android.os.Build.VERSION.SDK_INT >= 33) {
                         runOnMainSync {
                             val icon =
-                                targetContext.packageManager.getApplicationIcon(
-                                    targetContext.packageName
-                                ) as android.graphics.drawable.AdaptiveIconDrawable
+                                appContext.packageManager.getApplicationIcon(appContext.packageName)
+                                    as android.graphics.drawable.AdaptiveIconDrawable
                             val mask = checkNotNull(icon.monochrome) { "Missing themed icon mask" }
                             val bitmap =
                                 android.graphics.Bitmap.createBitmap(
@@ -434,7 +678,7 @@ class PhoneExercise : Instrumentation() {
                         try {
                             for (name in names) {
                                 bitmap.eraseColor(android.graphics.Color.TRANSPARENT)
-                                val icon = SvgIcon(targetContext, name)
+                                val icon = SvgIcon(appContext, name)
                                 val spec =
                                     android.view.View.MeasureSpec.makeMeasureSpec(
                                         96,
@@ -482,18 +726,18 @@ class PhoneExercise : Instrumentation() {
                             positioned =
                                 timeline().scrollX > 0 ||
                                     Times.format(
-                                        System.currentTimeMillis(),
+                                        AppPlatform.now(),
                                         "HH",
-                                        PlaceStore(targetContext).selected().zone,
+                                        PlaceStore(appContext).selected().zone,
                                     ) == "00"
                         }
                         positioned
                     }
                     val date =
                         Times.format(
-                            System.currentTimeMillis(),
+                            AppPlatform.now(),
                             "EEEE, dd MMM yyyy",
-                            PlaceStore(targetContext).selected().zone,
+                            PlaceStore(appContext).selected().zone,
                         )
                     check(has(date) && !has("HOURLY FORECAST") && !has("00:00–24:00"))
                     waitFor("ready to refresh", 30000) {
@@ -508,7 +752,7 @@ class PhoneExercise : Instrumentation() {
                         check(bounds.right == activity.window.decorView.width) {
                             "Hourly table must reach the right edge"
                         }
-                        timeline().scrollTo(targetContext.dp(112), 0)
+                        timeline().scrollTo(appContext.dp(112), 0)
                         offset = timeline().scrollX
                         refresh().performClick()
                     }
@@ -560,7 +804,7 @@ class PhoneExercise : Instrumentation() {
                                 "header-temperature"
                             )
                         prominent =
-                            weather.height >= targetContext.dp(108) &&
+                            weather.height >= appContext.dp(108) &&
                                 temp.textSize >=
                                     android.util.TypedValue.applyDimension(
                                         android.util.TypedValue.COMPLEX_UNIT_SP,
@@ -572,9 +816,9 @@ class PhoneExercise : Instrumentation() {
                     check(
                         has(
                             Times.format(
-                                System.currentTimeMillis(),
+                                AppPlatform.now(),
                                 "EEEE, dd MMM yyyy",
-                                PlaceStore(targetContext).selected().zone,
+                                PlaceStore(appContext).selected().zone,
                             )
                         ) && !has("NEXT 24 HOURS")
                     )
@@ -588,7 +832,7 @@ class PhoneExercise : Instrumentation() {
                         columnsFit =
                             first != null &&
                                 first.text.toString().contains("00:00") &&
-                                first.width <= targetContext.dp(56) &&
+                                first.width <= appContext.dp(56) &&
                                 first.typeface.isBold
                         dataRows =
                             activity.window.decorView.findViewWithTag<android.view.View>(
@@ -637,7 +881,7 @@ class PhoneExercise : Instrumentation() {
                     click("Today")
                     result.putString(
                         "checks",
-                        "larger header weather; narrower bold midnight-to-midnight columns; precipitation probability and gust rows; local sunrise/sunset card; identical formatted details in Today/Week without DATA TRANSMISSION",
+                        "larger header weather; local-midnight through tomorrow-noon columns; precipitation probability and gust rows; local sunrise/sunset card; identical formatted details in Today/Week without DATA TRANSMISSION",
                     )
                 }
                 "header-weather" -> {
@@ -698,7 +942,7 @@ class PhoneExercise : Instrumentation() {
                         activity.window.decorView.getGlobalVisibleRect(windowBounds)
                     }
                     check(
-                        windowBounds.right - sourceBounds.right <= targetContext.dp(24) &&
+                        windowBounds.right - sourceBounds.right <= appContext.dp(24) &&
                             sourceBounds.top < nameBounds.top
                     ) {
                         "DWD source note must sit in the header's top-right corner"
@@ -758,46 +1002,77 @@ class PhoneExercise : Instrumentation() {
                             if (root is android.view.ViewGroup)
                                 (0 until root.childCount).flatMap { views(root.getChildAt(it)) }
                             else emptyList()
-                    fun body(): android.view.ViewGroup {
-                        val scroll =
-                            views(activity.window.decorView)
-                                .filterIsInstance<android.widget.ScrollView>()
-                                .first { it.visibility == android.view.View.VISIBLE }
-                        return scroll.getChildAt(0) as android.view.ViewGroup
-                    }
+                    fun tagged(tag: String): android.view.View? =
+                        activity.window.decorView.findViewWithTag(tag)
+                    fun anchor(page: String): android.view.View =
+                        tagged(if (page == "Week") "week-row:0" else "today-date")
+                            ?: error("Missing $page anchor")
+                    fun firstChild(tag: String): android.view.View? =
+                        (tagged("forecast-body") as? android.view.ViewGroup)
+                            ?.getChildAt(0)
+                            ?.takeIf { it.tag == tag }
                     for (page in listOf("Today", "Week")) {
                         click(page)
+                        val tag = if (page == "Week") "week-row:0" else "today-date"
                         waitFor("forecast ready to refresh") {
                             var ready = false
                             runOnMainSync {
+                                val body = tagged("forecast-body") as? android.view.ViewGroup
                                 ready =
-                                    views(body()).filterIsInstance<android.widget.Button>().any {
-                                        it.text.toString() == "REFRESH DWD" && it.isEnabled
-                                    }
+                                    body != null &&
+                                        tagged(tag)?.isShown == true &&
+                                        views(body).filterIsInstance<android.widget.Button>().any {
+                                            it.text.toString() == "REFRESH DWD" && it.isEnabled
+                                        }
                             }
                             ready
                         }
                         val before = Rect()
-                        var bannerAbsent = false
                         runOnMainSync {
-                            val old = body().getChildAt(0)
-                            old.getGlobalVisibleRect(before)
-                            views(body())
+                            activity.window.decorView
+                                .findViewWithTag<android.widget.ScrollView>("forecast-scroll")
+                                ?.scrollTo(0, 0)
+                            val anchorView = anchor(page)
+                            check(anchorView.isShown)
+                            check(anchorView.getGlobalVisibleRect(before)) {
+                                "$page anchor is not visible"
+                            }
+                            check(firstChild(tag) === anchorView) {
+                                "Status banner inserted above $page content before refresh"
+                            }
+                            views(tagged("forecast-body")!!)
                                 .filterIsInstance<android.widget.Button>()
                                 .first { it.text.toString() == "REFRESH DWD" }
                                 .performClick()
-                            bannerAbsent = body().getChildAt(0) is android.view.ViewGroup
+                        }
+                        var bannerAbsent = false
+                        runOnMainSync {
+                            val anchorView = firstChild(tag)
+                            bannerAbsent = anchorView != null && anchorView.isShown
                         }
                         check(bannerAbsent) {
                             "Status banner inserted above $page content during refresh"
                         }
                         waitFor("refreshed content laid out", 3000) {
                             var measured = false
-                            runOnMainSync { measured = body().getChildAt(0).height > 0 }
+                            runOnMainSync {
+                                val anchorView = firstChild(tag)
+                                val box = Rect()
+                                measured =
+                                    anchorView != null &&
+                                        anchorView.height > 0 &&
+                                        anchorView.getGlobalVisibleRect(box)
+                            }
                             measured
                         }
                         val after = Rect()
-                        runOnMainSync { body().getChildAt(0).getGlobalVisibleRect(after) }
+                        runOnMainSync {
+                            val anchorView = anchor(page)
+                            check(anchorView.isShown)
+                            check(anchorView.getGlobalVisibleRect(after)) {
+                                "$page anchor is not visible after refresh"
+                            }
+                        }
                         check(before.top == after.top) {
                             "$page content moved when refresh status changed"
                         }
@@ -805,7 +1080,7 @@ class PhoneExercise : Instrumentation() {
                     click("Today")
                     result.putString(
                         "checks",
-                        "Today/Week refresh inserts no status banner; content top stays fixed",
+                        "Today/Week refresh inserts no status banner; tagged content anchor stays shown and fixed",
                     )
                 }
                 "copy-cleanup" -> {
@@ -849,16 +1124,28 @@ class PhoneExercise : Instrumentation() {
                     }
                     click("Places")
                     var buttonsFirst = false
+                    var placesShown = false
                     runOnMainSync {
-                        val scroll =
-                            views(activity.window.decorView)
-                                .filterIsInstance<android.widget.ScrollView>()
-                                .first { it.visibility == android.view.View.VISIBLE }
-                        val body = scroll.getChildAt(0) as android.view.ViewGroup
+                        val places =
+                            activity.window.decorView.findViewWithTag<android.widget.ScrollView>(
+                                "places-scroll"
+                            ) ?: error("Missing places-scroll")
+                        val forecast =
+                            activity.window.decorView.findViewWithTag<android.view.View>(
+                                "forecast-scroll"
+                            ) ?: error("Missing forecast-scroll")
+                        val body = places.getChildAt(0) as android.view.ViewGroup
                         val first = body.getChildAt(0)
+                        placesShown =
+                            places.isShown &&
+                                places.getGlobalVisibleRect(Rect()) &&
+                                !forecast.isShown
                         buttonsFirst =
-                            first is android.widget.Button && first.text.toString() == "SEARCH CITY"
+                            first is android.widget.Button &&
+                                first.text.toString() == "SEARCH CITY" &&
+                                first.isShown
                     }
+                    check(placesShown) { "Places must be the shown scroll view" }
                     check(buttonsFirst) { "Places must start directly with the buttons" }
                     check(texts().any { it == "FAVOURITES" })
                     click("Today")
@@ -869,7 +1156,7 @@ class PhoneExercise : Instrumentation() {
                 }
                 "recenter-probe" -> {
                     click("Radar")
-                    val place = PlaceStore(targetContext).selected()
+                    val place = PlaceStore(appContext).selected()
                     val action =
                         radarMapNode().actionList.first {
                             it.label?.toString() == "Recenter on selected location"
@@ -904,7 +1191,7 @@ class PhoneExercise : Instrumentation() {
                     var line: android.widget.ProgressBar? = null
                     runOnMainSync {
                         line = activity.window.decorView.findViewWithTag("download-progress")
-                        check(line != null && line!!.height == targetContext.dp(2)) {
+                        check(line != null && line!!.height == appContext.dp(2)) {
                             "Download line needs reserved height"
                         }
                         for (name in listOf("TODAY", "WEEK", "RADAR", "PLACES")) {
@@ -1088,7 +1375,7 @@ class PhoneExercise : Instrumentation() {
                     )
                     click("SEARCH CITY")
                     check(has("Search city"))
-                    click("Cancel")
+                    click("Close dialog")
                     check(tab("Places").isSelected && has("FAVOURITES"))
                     click("Week")
                     check(
@@ -1137,6 +1424,158 @@ class PhoneExercise : Instrumentation() {
                         "Places selection and content survive Activity recreation; Today remains reachable",
                     )
                 }
+                "lifecycle-hardening" -> {
+                    // Regressions: tracked notices dialog during Activity destruction.
+                    click("Places")
+                    click("DATA & LICENCES")
+                    waitFor("licence dialog", 5000) { has("Application licence (MIT)") }
+                    click("Close")
+                    waitFor("licence dialog closes", 3000) {
+                        !has("Application licence (MIT)")
+                    }
+                    click("DATA & LICENCES")
+                    waitFor("licence dialog reopens", 5000) {
+                        has("Application licence (MIT)")
+                    }
+                    shell("logcat -c")
+                    var owner: android.app.Activity = activity
+                    val monitor = addMonitor(MainActivity::class.java.name, null, false)
+                    try {
+                        runOnMainSync { owner.recreate() }
+                        owner =
+                            waitForMonitorWithTimeout(monitor, 10000)
+                                ?: error("Activity did not recreate with an open notices dialog")
+                        waitForIdleSync()
+                    } finally {
+                        removeMonitor(monitor)
+                    }
+                    // Destroying the focused dialog window detaches this instrumentation's
+                    // accessibility connection, so verify the replacement Activity's own
+                    // view state instead of the accessibility tree.
+                    var placesShown = false
+                    var forecastShown = false
+                    var dialog: android.app.AlertDialog? = null
+                    runOnMainSync {
+                        val decor = owner.window.decorView
+                        placesShown =
+                            decor.findViewWithTag<android.view.View>("places-scroll")?.isShown ==
+                                true
+                        forecastShown =
+                            decor.findViewWithTag<android.view.View>("forecast-scroll")?.isShown ==
+                                true
+                        dialog =
+                            MainActivity::class
+                                .java
+                                .getDeclaredField("noticesDialog")
+                                .apply { isAccessible = true }
+                                .get(owner) as? android.app.AlertDialog
+                    }
+                    check(activity.isDestroyed) { "Original Activity was not destroyed" }
+                    check(placesShown && !forecastShown) {
+                        "Places did not survive recreation with an open notices dialog"
+                    }
+                    check(dialog?.isShowing != true) {
+                        "Notices dialog outlived its destroyed Activity"
+                    }
+                    SystemClock.sleep(1000)
+                    val windowLog = shell("logcat -d -s WindowManager")
+                    check(
+                        !(windowLog.contains("WindowLeaked") &&
+                            windowLog.contains("app.drizziq.MainActivity"))
+                    ) {
+                        "Destroyed Activity leaked its notices window"
+                    }
+                    result.putString(
+                        "checks",
+                        "notices dialog closes and reopens; recreation with the dialog open destroys the original Activity, keeps Places, and dismisses the dialog without a leaked window",
+                    )
+                }
+                "radar-corruption" -> {
+
+                    click("Radar")
+                    waitFor("radar sequence for failed frame", 180000) {
+                        nodes().any {
+                            it.className == "android.widget.SeekBar" &&
+                                (it.rangeInfo?.max ?: 0f) > 0f
+                        }
+                    }
+                    waitFor("radar refresh settles", 30000) { !Http.downloads.active }
+                    SystemClock.sleep(1500)
+                    val data = java.io.File(appContext.filesDir, "data")
+                    val manifest = java.io.File(data, "radar.json")
+                    check(manifest.isFile) { "Radar manifest is missing" }
+                    val frames = org.json.JSONObject(manifest.readText()).getJSONArray("frames")
+                    val target = frames.length() - 1
+                    check(target > 0) { "Radar timeline needs more than one frame" }
+                    val frameFile =
+                        java.io.File(data, frames.getJSONObject(target).getString("file"))
+                    check(frameFile.isFile) { "Selected radar frame is missing" }
+                    val original = frameFile.readBytes()
+                    fun views(root: android.view.View): List<android.view.View> =
+                        listOf(root) +
+                            if (root is android.view.ViewGroup)
+                                (0 until root.childCount).flatMap {
+                                    views(root.getChildAt(it))
+                                }
+                            else emptyList()
+                    try {
+                        frameFile.writeBytes(byteArrayOf(0, 1, 2, 3, 4, 5))
+                        val bounds =
+                            Rect().apply {
+                                nodes()
+                                    .first { it.className == "android.widget.SeekBar" }
+                                    .getBoundsInScreen(this)
+                            }
+                        drag(
+                            bounds.left + 2f,
+                            bounds.centerY().toFloat(),
+                            bounds.right - 2f,
+                            bounds.centerY().toFloat(),
+                        )
+                        waitFor("failed frame decode", 15000) {
+                            has("Radar frame unavailable")
+                        }
+                        val timeline = nodes().first { it.className == "android.widget.SeekBar" }
+                        check(timeline.rangeInfo.current.toInt() == target) {
+                            "Timeline must select the frame that failed to decode"
+                        }
+                        check(timeline.contentDescription.toString().contains("unavailable")) {
+                            "Accessible timeline must report the failed frame"
+                        }
+                        var frame: RadarFrame? = null
+                        runOnMainSync {
+                            frame =
+                                views(activity.window.decorView)
+                                    .filterIsInstance<RadarMap>()
+                                    .single()
+                                    .frame
+                        }
+                        check(frame == null) {
+                            "Failed decode left the previous radar frame displayed"
+                        }
+                    } finally {
+                        frameFile.writeBytes(original)
+                    }
+                    val repaired =
+                        Rect().apply {
+                            nodes()
+                                .first { it.className == "android.widget.SeekBar" }
+                                .getBoundsInScreen(this)
+                        }
+                    drag(
+                        repaired.left + 2f,
+                        repaired.centerY().toFloat(),
+                        repaired.right - 2f,
+                        repaired.centerY().toFloat(),
+                    )
+                    waitFor("repaired frame displays", 15000) {
+                        !has("Radar frame unavailable")
+                    }
+                    result.putString(
+                        "checks",
+                        "corrupt selected frame clears the map while timeline and accessible description name the unavailable frame; repaired frame displays",
+                    )
+                }
                 "geocoding-probe" -> {
                     try {
                         val reply = GeocodeHttp().fetch(Geocoding.url("München"))
@@ -1163,17 +1602,17 @@ class PhoneExercise : Instrumentation() {
                     }
                 }
                 "places-integration" -> {
-                    val prefs = targetContext.getSharedPreferences("places", 0)
-                    val camera = targetContext.getSharedPreferences("radar-viewport", 0)
+                    val prefs = appContext.getSharedPreferences("places", 0)
+                    val camera = appContext.getSharedPreferences("radar-viewport", 0)
                     val oldSelected = prefs.getString("selected", null)
                     val oldFavourites = prefs.getString("favourites", null)
                     val oldCamera = camera.getString("camera", null)
                     val coarse =
-                        targetContext.checkSelfPermission(
+                        appContext.checkSelfPermission(
                             android.Manifest.permission.ACCESS_COARSE_LOCATION
                         )
                     val fine =
-                        targetContext.checkSelfPermission(
+                        appContext.checkSelfPermission(
                             android.Manifest.permission.ACCESS_FINE_LOCATION
                         )
                     var owner = activity
@@ -1181,7 +1620,7 @@ class PhoneExercise : Instrumentation() {
                         click("Places")
                         click("SEARCH CITY")
                         enter("CITY NAME", "München")
-                        click("Search")
+                        submitSearch()
                         waitFor("candidate list", 45000) {
                             nodes().any {
                                 it.contentDescription
@@ -1205,10 +1644,10 @@ class PhoneExercise : Instrumentation() {
                                 .matchEntire(candidate)!!
                         click(candidate)
                         waitFor("explicit result selection") {
-                            PlaceStore(targetContext).selected().geocodeId ==
+                            PlaceStore(appContext).selected().geocodeId ==
                                 "open-meteo:${detail.groupValues[1]}"
                         }
-                        val selected = PlaceStore(targetContext).selected()
+                        val selected = PlaceStore(appContext).selected()
                         check(
                             selected.lat == detail.groupValues[2].toDouble() &&
                                 selected.lon == detail.groupValues[3].toDouble()
@@ -1222,7 +1661,7 @@ class PhoneExercise : Instrumentation() {
                         click("SAVE CURRENT AS FAVOURITE")
                         enter("FAVOURITE LABEL", "Geocoding integration snapshot")
                         click("Save")
-                        val saved = PlaceStore(targetContext).selected()
+                        val saved = PlaceStore(appContext).selected()
                         check(saved.geocodeId == selected.geocodeId && saved.geocodeLabelEdited)
                         val monitor = addMonitor(MainActivity::class.java.name, null, false)
                         try {
@@ -1234,16 +1673,16 @@ class PhoneExercise : Instrumentation() {
                         } finally {
                             removeMonitor(monitor)
                         }
-                        check(PlaceStore(targetContext).selected() == saved)
-                        check(PlaceStore(targetContext).favourites().any { it == saved })
+                        check(PlaceStore(appContext).selected() == saved)
+                        check(PlaceStore(appContext).favourites().any { it == saved })
                         // Opted-in fixture selections replace the removed manual-coordinate UI.
                         fun fixture(place: Place) {
                             runOnMainSync { owner.finish() }
                             waitForIdleSync()
-                            PlaceStore(targetContext).select(place)
+                            PlaceStore(appContext).select(place)
                             owner =
                                 startActivitySync(
-                                    Intent(targetContext, MainActivity::class.java)
+                                    Intent(appContext, MainActivity::class.java)
                                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                 )
                         }
@@ -1261,7 +1700,7 @@ class PhoneExercise : Instrumentation() {
                                     it.text?.toString() == "MUENCHEN STADT"
                             }
                         )
-                        click("Cancel")
+                        click("Close dialog")
                         fixture(Place("Coverage test", 0.0, 0.0, "UTC"))
                         waitFor("coverage explanation") {
                             has("No DWD forecast point within 50 km")
@@ -1275,12 +1714,12 @@ class PhoneExercise : Instrumentation() {
                         click("Radar")
                         check(has("Precipitation map"))
                         check(
-                            targetContext.checkSelfPermission(
+                            appContext.checkSelfPermission(
                                 android.Manifest.permission.ACCESS_COARSE_LOCATION
                             ) == coarse
                         )
                         check(
-                            targetContext.checkSelfPermission(
+                            appContext.checkSelfPermission(
                                 android.Manifest.permission.ACCESS_FINE_LOCATION
                             ) == fine
                         )
@@ -1304,20 +1743,20 @@ class PhoneExercise : Instrumentation() {
                             "Could not restore original map"
                         }
                         startActivitySync(
-                            Intent(targetContext, MainActivity::class.java)
+                            Intent(appContext, MainActivity::class.java)
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         )
                     }
                 }
                 "station-benchmark" -> {
                     check(
-                        targetContext.applicationInfo.flags and
+                        appContext.applicationInfo.flags and
                             android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE == 0
                     ) {
                         "Benchmark requires a release build"
                     }
                     val start = SystemClock.elapsedRealtimeNanos()
-                    val bytes = targetContext.assets.open("stations.tsv").use { it.readBytes() }
+                    val bytes = appContext.assets.open("stations.tsv").use { it.readBytes() }
                     val index = StationIndex.fromTsv(bytes.toString(Charsets.UTF_8))
                     val loadMs = (SystemClock.elapsedRealtimeNanos() - start) / 1_000_000.0
                     repeat(20) { index.nearestInCoverage(Place.MUNICH) }
@@ -1347,17 +1786,17 @@ class PhoneExercise : Instrumentation() {
                     )
                 }
                 "places-search" -> {
-                    val original = PlaceStore(targetContext).selected()
-                    val favourites = PlaceStore(targetContext).favourites()
+                    val original = PlaceStore(appContext).selected()
+                    val favourites = PlaceStore(appContext).favourites()
                     val coarse =
-                        targetContext.checkSelfPermission(
+                        appContext.checkSelfPermission(
                             android.Manifest.permission.ACCESS_COARSE_LOCATION
                         )
                     val fine =
-                        targetContext.checkSelfPermission(
+                        appContext.checkSelfPermission(
                             android.Manifest.permission.ACCESS_FINE_LOCATION
                         )
-                    val platform = PlatformLocationSource(targetContext)
+                    val platform = PlatformLocationSource(appContext)
                     val eligible = platform.enabledProviders()
                     check(eligible.all { it in listOf("gps", "network") })
                     if (fine != android.content.pm.PackageManager.PERMISSION_GRANTED)
@@ -1378,31 +1817,33 @@ class PhoneExercise : Instrumentation() {
                     }
                     click("Places")
                     click("SEARCH CITY")
-                    check(has("Open-Meteo") && has("query")) {
-                        "Search disclosure/attribution missing"
+                    waitFor("search disclosure and attribution", 3000) {
+                        has("Open-Meteo") && has("query")
                     }
                     enter("CITY NAME", "M")
-                    click("Search")
+                    submitSearch()
                     waitFor("query validation", 3000) { has("2–120") }
                     enter("CITY NAME", "München")
-                    click("Search")
+                    submitSearch()
                     waitFor("city candidates", 45000) {
                         nodes().any {
                             it.contentDescription?.toString()?.startsWith("Select city result ") ==
                                 true
                         }
                     }
-                    check(PlaceStore(targetContext).selected() == original) {
+                    check(PlaceStore(appContext).selected() == original) {
                         "Search selected a candidate without a tap"
                     }
                     enter("CITY NAME", "Berlin")
-                    waitFor("editing invalidates results", 3000) {
-                        nodes().none {
-                            it.contentDescription?.toString()?.startsWith("Select city result ") ==
-                                true
-                        }
+                    waitFor("edited query publishes only its own results", 10000) {
+                        val results =
+                            nodes()
+                                .mapNotNull { it.contentDescription?.toString() }
+                                .filter { it.startsWith("Select city result ") }
+                        results.any { it.contains("Berlin") } &&
+                            results.none { it.contains("München") }
                     }
-                    click("Cancel")
+                    click("Close dialog")
                     click("CLEAR SEARCH CACHE")
                     click("DATA & LICENCES")
                     waitFor("licence dialog", 5000) { has("Application licence (MIT)") }
@@ -1416,8 +1857,8 @@ class PhoneExercise : Instrumentation() {
                     }
                     click("Close")
                     check(
-                        PlaceStore(targetContext).favourites() == favourites &&
-                            PlaceStore(targetContext).selected() == original
+                        PlaceStore(appContext).favourites() == favourites &&
+                            PlaceStore(appContext).selected() == original
                     )
                     if (
                         coarse != android.content.pm.PackageManager.PERMISSION_GRANTED &&
@@ -1426,7 +1867,7 @@ class PhoneExercise : Instrumentation() {
                         click("USE CURRENT LOCATION")
                         if (has("Current location")) {
                             check(has("on this device")) { "Location rationale missing" }
-                            click("Cancel")
+                            click("Close dialog")
                         } else {
                             check(
                                 has("Location access") && (has("City search") || has("city search"))
@@ -1435,16 +1876,16 @@ class PhoneExercise : Instrumentation() {
                         }
                     }
                     check(
-                        targetContext.checkSelfPermission(
+                        appContext.checkSelfPermission(
                             android.Manifest.permission.ACCESS_COARSE_LOCATION
                         ) == coarse
                     )
                     check(
-                        targetContext.checkSelfPermission(
+                        appContext.checkSelfPermission(
                             android.Manifest.permission.ACCESS_FINE_LOCATION
                         ) == fine
                     )
-                    check(PlaceStore(targetContext).selected() == original)
+                    check(PlaceStore(appContext).selected() == original)
                     result.putString(
                         "checks",
                         "explicit city search; query validation; candidates require selection; editing/cancel/cache-clear preserve selection and favourites; optional location rationale cancellation preserves permissions",
@@ -1457,7 +1898,7 @@ class PhoneExercise : Instrumentation() {
                     val moved = radarMapNode().contentDescription.toString()
                     check(moved != original) { "Persistence test must change the viewport" }
                     check(
-                        targetContext
+                        appContext
                             .getSharedPreferences("radar-test", 0)
                             .edit()
                             .putString("expected", moved)
@@ -1471,9 +1912,7 @@ class PhoneExercise : Instrumentation() {
                 "viewport-restore" -> {
                     click("Radar")
                     val expected =
-                        targetContext
-                            .getSharedPreferences("radar-test", 0)
-                            .getString("expected", null)
+                        appContext.getSharedPreferences("radar-test", 0).getString("expected", null)
                     check(expected != null) { "Run viewport-save before viewport-restore" }
                     check(radarMapNode().contentDescription.toString() == expected) {
                         "Viewport reset after process restart: expected $expected; got ${radarMapNode().contentDescription}"
@@ -1551,7 +1990,7 @@ class PhoneExercise : Instrumentation() {
                             it.contentDescription?.toString() == "Play or pause radar animation"
                         }
                     val playBounds = Rect().apply { play.getBoundsInScreen(this) }
-                    check(play.text.isNullOrBlank() && playBounds.width() <= targetContext.dp(48)) {
+                    check(play.text.isNullOrBlank() && playBounds.width() <= appContext.dp(48)) {
                         "Playback must use a compact icon button"
                     }
                     val barBounds =
@@ -1560,10 +1999,10 @@ class PhoneExercise : Instrumentation() {
                                 .first { it.className == "android.widget.SeekBar" }
                                 .getBoundsInScreen(this)
                         }
-                    check(barBounds.height() <= targetContext.dp(40)) {
-                        "Timeline must give the removed NOW label space back to the map"
+                    check(barBounds.height() == appContext.dp(48)) {
+                        "Timeline must fit the 48 dp player controls"
                     }
-                    val selectedPlace = PlaceStore(targetContext).selected()
+                    val selectedPlace = PlaceStore(appContext).selected()
                     radarGestures()
                     val recenter =
                         radarMapNode().actionList.first {
@@ -1601,6 +2040,11 @@ class PhoneExercise : Instrumentation() {
                     waitFor("last frame selected") {
                         bar().rangeInfo.current == bar().rangeInfo.max
                     }
+                    waitFor("radar player foreground", 5000) {
+                        var focused = false
+                        runOnMainSync { focused = activity.hasWindowFocus() }
+                        focused
+                    }
                     click("Play or pause radar animation")
                     check(
                         nodes()
@@ -1611,7 +2055,12 @@ class PhoneExercise : Instrumentation() {
                     ) {
                         "Play icon must reflect playback state"
                     }
-                    waitFor("playback loops", 10000) {
+                    waitFor("playback loops", 20000) {
+                        val button =
+                            nodes().firstOrNull {
+                                it.contentDescription?.toString() == "Play or pause radar animation"
+                            }
+                        check(button?.isSelected != false) { "Playback stopped before looping" }
                         bar().rangeInfo.current < bar().rangeInfo.max
                     }
                     click("Play or pause radar animation")
@@ -1633,9 +2082,9 @@ class PhoneExercise : Instrumentation() {
                         !has("HOURLY FORECAST") &&
                             has(
                                 Times.format(
-                                    System.currentTimeMillis(),
+                                    AppPlatform.now(),
                                     "EEEE, dd MMM yyyy",
-                                    PlaceStore(targetContext).selected().zone,
+                                    PlaceStore(appContext).selected().zone,
                                 )
                             )
                     )
@@ -1667,9 +2116,10 @@ class PhoneExercise : Instrumentation() {
                         scroll().performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
                         SystemClock.sleep(120)
                     }
-                    val zone = PlaceStore(targetContext).selected().zone
+                    val zone = PlaceStore(appContext).selected().zone
                     val last =
                         java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone(zone)).apply {
+                            timeInMillis = AppPlatform.now()
                             add(java.util.Calendar.DAY_OF_MONTH, 6)
                         }
                     check(has(Times.format(last.timeInMillis, "dd MMM", zone))) {
@@ -1707,7 +2157,7 @@ class PhoneExercise : Instrumentation() {
                     click("PLACES")
                     click("SEARCH CITY")
                     enter("CITY NAME", "Berlin")
-                    click("Search")
+                    submitSearch()
                     waitFor("Berlin city result", 45000) {
                         nodes().any {
                             it.contentDescription
@@ -1810,24 +2260,93 @@ class PhoneExercise : Instrumentation() {
                 }
                 "offline" -> {
                     waitFor("offline cached forecast") {
-                        has("OFFLINE") && has("STALE") && has("Temperature ")
+                        has("STALE") && has("Temperature ")
+                    }
+                    check(
+                        !has("No forecast received") && !has("Receiving the atmosphere") && has("°")
+                    ) {
+                        "Offline refresh must retain cached forecast values"
                     }
                     click("Radar")
                     waitFor("offline cached radar") {
-                        has("STALE") && has("frames") && has("OBSERVED")
+                        has("Offline radar") && has("STALE") && has("frames") && has("OBSERVED")
                     }
                     click("Play or pause radar animation")
                     SystemClock.sleep(1800)
                     click("Play or pause radar animation")
                     result.putString(
                         "checks",
-                        "airplane mode retains forecast and radar; stale/offline labels; cached playback",
+                        "airplane mode retains cached forecast values; Today STALE; Radar offline notice; cached playback",
+                    )
+                }
+                "stopped-network" -> {
+                    // Full-only: the runner has disabled connectivity before this phase and
+                    // restores the original radios afterwards.
+                    waitFor("offline cache before stop", 30000) {
+                        has("STALE") && has("Temperature ")
+                    }
+                    check(!Http.downloads.active) {
+                        "Downloads were already running before the Activity stopped"
+                    }
+                    val data = java.io.File(appContext.filesDir, "data")
+                    fun cache(): Map<String, Long> =
+                        (data.listFiles() ?: emptyArray())
+                            .filter { it.isFile }
+                            .associate { it.name to it.lastModified() }
+                    val beforeStop = cache()
+                    shell("input keyevent KEYCODE_HOME")
+                    waitFor("Activity stopped", 15000) {
+                        var focused = true
+                        runOnMainSync { focused = activity.window.decorView.hasWindowFocus() }
+                        !focused && !has("DRIZZIQ")
+                    }
+                    shell("cmd connectivity airplane-mode disable")
+                    shell("svc wifi enable")
+                    shell("svc data enable")
+                    val manager =
+                        appContext.getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+                            as android.net.ConnectivityManager
+                    fun validated(): Boolean {
+                        val capabilities = manager.getNetworkCapabilities(manager.activeNetwork)
+                        return capabilities?.hasCapability(
+                            android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED
+                        ) == true
+                    }
+                    waitFor("connectivity restored while stopped", 30000) { validated() }
+                    var downloadsWhileStopped = false
+                    val quietUntil = SystemClock.uptimeMillis() + 4000
+                    while (SystemClock.uptimeMillis() < quietUntil) {
+                        if (Http.downloads.active) {
+                            downloadsWhileStopped = true
+                            break
+                        }
+                        SystemClock.sleep(50)
+                    }
+                    check(!downloadsWhileStopped) {
+                        "Network callback started downloads while the Activity was stopped"
+                    }
+                    check(cache() == beforeStop) {
+                        "A stopped Activity rewrote its cache after connectivity returned"
+                    }
+                    shell("am start -W --activity-single-top -n app.drizziq/.MainActivity")
+                    waitFor("foreground refresh after connectivity return", 60000) {
+                        has("LIVE") && has("Temperature ")
+                    }
+                    result.putString(
+                        "checks",
+                        "no downloads or cache writes while stopped; connectivity return reconciled by one foreground refresh",
                     )
                 }
                 "restore" -> {
                     waitFor("live forecast recovered") { has("LIVE") && has("Temperature ") }
                     result.putString("checks", "connectivity recovery returns forecast to live")
                 }
+                else -> error("Unknown phase: $phase")
+            }
+            if (fixture) {
+                check(PhoneFixtures.unexpected.isEmpty()) { "Unexpected fixture request" }
+                result.putInt("fixture_requests", PhoneFixtures.requests.get())
+                result.putInt("external_requests", 0)
             }
             result.putString("result", "PASS")
             finish(0, result)

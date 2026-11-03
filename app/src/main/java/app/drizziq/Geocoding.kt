@@ -42,7 +42,6 @@ data class GeocodeCandidate(
 object Geocoding {
     const val ENDPOINT = "https://geocoding-api.open-meteo.com/v1/search"
     const val MAX_BYTES = 256 * 1024
-    private val zones = TimeZone.getAvailableIDs().toSet()
 
     fun query(input: String): String {
         val normalized =
@@ -75,8 +74,10 @@ object Geocoding {
         lon: Double,
         offline: (Double, Double) -> String?,
     ): String? {
-        if (returned in zones) return returned
-        return runCatching { offline(lat, lon) }.getOrNull()?.takeIf { it in zones }
+        Zones.canonical(returned)?.let {
+            return it
+        }
+        return runCatching { offline(lat, lon) }.getOrNull()?.let { Zones.canonical(it) }
     }
 
     fun parse(text: String): List<GeocodeCandidate> {

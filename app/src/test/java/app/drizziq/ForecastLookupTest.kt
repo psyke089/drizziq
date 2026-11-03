@@ -78,6 +78,23 @@ class ForecastLookupTest {
     }
 
     @Test
+    fun invalidLegacyZone_publishesTerminalErrorInsteadOfWedgingRefresh() {
+        val source = Source()
+        val readings = mutableListOf<Reading<Forecast>>()
+        ForecastLookup({ StationIndex(listOf(point)) }, source, { 1000 }).load(
+            Place.MUNICH.copy(zone = "PST")
+        ) {
+            readings += it
+        }
+        assertEquals(1, readings.size)
+        assertEquals(Freshness.ERROR, readings.single().state)
+        assertFalse(readings.single().refreshing)
+        assertNull(readings.single().data)
+        assertEquals(0, source.reads)
+        assertEquals(0, source.requests)
+    }
+
+    @Test
     fun archivedForecast_isAddedAfterLatestPublication_andFailureKeepsLatestLive() {
         val now = java.time.Instant.parse("2026-10-31T12:00:00Z").toEpochMilli()
         val midnight = java.time.Instant.parse("2026-10-30T23:00:00Z").toEpochMilli()

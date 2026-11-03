@@ -20,7 +20,6 @@ import android.view.View
 import android.widget.*
 import java.time.LocalDate
 import java.util.Locale
-import java.util.TimeZone
 import java.util.concurrent.*
 import kotlin.math.abs
 
@@ -29,7 +28,6 @@ class MainActivity : Activity() {
     private lateinit var store: PlaceStore
     private lateinit var zones: ZoneLookup
     private lateinit var placeChoices: PlaceChoices
-    private lateinit var placeCredit: TextView
     private lateinit var root: LinearLayout
     private lateinit var content: FrameLayout
     private lateinit var placeTitle: TextView
@@ -60,6 +58,11 @@ class MainActivity : Activity() {
     private var frameError = false
     private lateinit var timeline: RadarTimeline
     private lateinit var playButton: ImageButton
+    private lateinit var radarTime: TextView
+    private lateinit var overlayInfo: TextView
+    private lateinit var overlayCredit: TextView
+    private var selectedOverlay: Overlay? = null
+    private var layerMenu: PopupWindow? = null
     private val handler = Handler(Looper.getMainLooper())
     private val decoder = Executors.newSingleThreadExecutor()
     private val frames = object : android.util.LruCache<String, Bitmap>(3) {}
@@ -68,9 +71,13 @@ class MainActivity : Activity() {
     private var decodeToken = 0
     private var playing = false
     private var active = false
+    private var started = false
+    private var stopped = false
     private var radarVisible = false
     private var ready = false
     private var dead = false
+    private var networkChangedWhileStopped = false
+    private var noticesDialog: AlertDialog? = null
     private var forecastVersion: Reading<Forecast>? = null
     private var lastForecastPlace: Place? = null
     private var lastForecastDay: String? = null
@@ -112,7 +119,13 @@ class MainActivity : Activity() {
 
     private fun changedNetwork() {
         handler.post {
-            if (ready && !dead) {
+            if (dead) return@post
+            if (!started) {
+                // A stopped window must not start downloads; onStart reconciles the change.
+                if (stopped) networkChangedWhileStopped = true
+                return@post
+            }
+            if (ready) {
                 val was = repo.online
                 val now = repo.connection()
                 if (!was && now) refresh()
@@ -126,13 +139,17 @@ class MainActivity : Activity() {
                 if (!active || dead) return
                 repo.age()
                 render()
-                if (repo.online && System.currentTimeMillis() - lastRefresh > 300000) refresh()
+                if (repo.online && AppPlatform.now() - lastRefresh > 300000) refresh()
                 handler.postDelayed(this, 30000)
             }
         }
     private val advance = Runnable {
         if (playing && active && radarVisible)
-            sequence?.let { requestFrame((frameIndex + 1) % it.frames.size) }
+            sequence?.let { requestFrame(nextRadarFrame(frameIndex, it.frames.size)) }
+    }
+
+    override fun attachBaseContext(base: android.content.Context) {
+        super.attachBaseContext(AppPlatform.context(base))
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -153,6 +170,10 @@ class MainActivity : Activity() {
                 },
                 { place -> zoneEntry(place) },
             )
+        selectedOverlay =
+            savedInstanceState?.getString("radar-overlay")?.let { name ->
+                Overlay.entries.firstOrNull { it.name == name }
+            }
         createLayout()
         ready = true
         progressSubscription =
@@ -255,28 +276,27 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(dp(180), -2).apply { leftMargin = dp(12) },
         )
         root.addView(location)
-        placeCredit =
-            placeCreditView().apply {
-                visibility = View.GONE
-                setPadding(dp(20), dp(4), dp(20), 0)
-            }
-        root.addView(placeCredit)
         root.space(16)
         content = FrameLayout(this)
         root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
         forecastScroll =
             ScrollView(this).apply {
+                tag = "forecast-scroll"
                 isFillViewport = true
                 clipToPadding = false
-                setPadding(dp(20), 0, 0, 0)
+                setPadding(0, 0, 0, 0)
             }
         forecastContainer = column()
-        weekHeader = column().apply { setPadding(dp(20), 0, dp(20), 0) }
+        weekHeader = column()
         forecastContainer.addView(weekHeader)
         forecastContainer.addView(forecastScroll, LinearLayout.LayoutParams(-1, 0, 1f))
         content.addView(forecastContainer, FrameLayout.LayoutParams(-1, -1))
         createRadar()
-        placesScroll = ScrollView(this).apply { isFillViewport = true }
+        placesScroll =
+            ScrollView(this).apply {
+                tag = "places-scroll"
+                isFillViewport = true
+            }
         content.addView(placesScroll, FrameLayout.LayoutParams(-1, -1))
         root.addView(
             View(this).apply { setBackgroundColor(Hud.line) },
@@ -310,25 +330,20 @@ class MainActivity : Activity() {
         root.addView(nav)
     }
 
-    private fun section(title: String, tag: String? = null): LinearLayout =
-        row().apply {
-            addView(label(title, 11f, Hud.muted, true), LinearLayout.LayoutParams(0, -2, 1f))
-            if (tag != null) addView(label(tag, 9f, Hud.cyan, true))
-        }
-
     private fun buildForecast(scroll: Int = forecastScroll.scrollY) {
         val data = repo.forecast
         val forecast = data.data
         val place = repo.place
         val state = data.state
-        val now = System.currentTimeMillis()
+        val now = AppPlatform.now()
         val key = place to Times.day(now, place.zone)
         val hourlyOffset = hourlyView?.takeIf { hourlyKey == key }?.timelineOffset
         hourlyView = null
         hourlyKey = key
         val body =
             column().apply {
-                setPadding(0, 0, dp(20), 0)
+                tag = "forecast-body"
+                setPadding(0, 0, 0, 0)
                 clipToPadding = false
                 clipChildren = false
             }
@@ -370,7 +385,13 @@ class MainActivity : Activity() {
             )
             empty.space(24)
             empty.addView(action("RETRY") { refresh() })
-            body.addView(empty)
+            body.addView(
+                empty,
+                LinearLayout.LayoutParams(-1, -2).apply {
+                    leftMargin = dp(20)
+                    rightMargin = dp(20)
+                },
+            )
             if (page != Page.WEEK) {
                 body.space(16)
                 addSunriseCard(body, place)
@@ -384,7 +405,13 @@ class MainActivity : Activity() {
             addSunriseCard(body, place)
         }
         body.space(16)
-        body.addView(ForecastDetailsCard(this, data, place) { refresh() })
+        body.addView(
+            ForecastDetailsCard(this, data, place) { refresh() },
+            LinearLayout.LayoutParams(-1, -2).apply {
+                leftMargin = dp(20)
+                rightMargin = dp(20)
+            },
+        )
         body.space(12)
         forecastScroll.post { forecastScroll.scrollTo(0, scroll) }
     }
@@ -414,7 +441,13 @@ class MainActivity : Activity() {
 
     private fun addSunriseCard(body: LinearLayout, place: Place) {
         sunriseCard = SunriseCard(this).apply { bind(solarDay, place.zone, solarFailed) }
-        body.addView(sunriseCard)
+        body.addView(
+            sunriseCard,
+            LinearLayout.LayoutParams(-1, -2).apply {
+                leftMargin = dp(20)
+                rightMargin = dp(20)
+            },
+        )
     }
 
     private fun buildHourly(
@@ -425,7 +458,12 @@ class MainActivity : Activity() {
         offset: Int?,
     ) {
         val columns = hourlyColumns(forecast, now, place.zone)
-        body.addView(label(Times.format(now, "EEEE, dd MMM yyyy", place.zone), 12f, Hud.cyan, true))
+        body.addView(
+            label(Times.format(now, "EEEE, dd MMM yyyy", place.zone), 12f, Hud.cyan, true).apply {
+                tag = "today-date"
+                setPadding(dp(20), 0, dp(20), 0)
+            }
+        )
         body.space(12)
         if (columns.isEmpty()) body.addView(label("No hourly forecast for today", 13f, Hud.muted))
         else {
@@ -436,15 +474,36 @@ class MainActivity : Activity() {
                     place.zone,
                     offset ?: dp(56) * currentHourColumn(columns, now),
                 )
-            body.addView(
-                hourlyView,
-                LinearLayout.LayoutParams(-1, -2).apply { rightMargin = -dp(20) },
-            )
+            body.addView(hourlyView, LinearLayout.LayoutParams(-1, -2))
         }
     }
 
     private fun buildWeek(body: LinearLayout, forecast: Forecast, place: Place, now: Long) {
         val days = forecast.days(now, place.zone)
+        val labels = days.map {
+            Times.format(it.time, "EEE", place.zone) to Times.format(it.time, "dd MMM", place.zone)
+        }
+        val datePaint = android.graphics.Paint()
+        val scale = resources.displayMetrics.scaledDensity
+        datePaint.typeface = Typeface.create("monospace", Typeface.NORMAL)
+        var dateWidth = dp(64)
+        for ((weekday, date) in labels) {
+            datePaint.textSize = 15 * scale
+            val weekdayWidth = datePaint.measureText(weekday)
+            datePaint.textSize = 10 * scale
+            dateWidth =
+                maxOf(
+                    dateWidth,
+                    kotlin.math
+                        .ceil(
+                            maxOf(
+                                weekdayWidth,
+                                datePaint.measureText(date),
+                            ) + dp(8)
+                        )
+                        .toInt(),
+                )
+        }
         fun cell(
             row: LinearLayout,
             text: String,
@@ -459,13 +518,13 @@ class MainActivity : Activity() {
         }
         val head =
             row().apply {
-                setBackgroundColor(Hud.panel)
+                setBackgroundColor(Hud.tableHeader)
             }
         head.addView(
             ForecastMetricLabel(this, ForecastMetric.TIME).apply {
-                setBackgroundColor(Hud.legend)
+                setBackgroundColor(Hud.tableHeader)
             },
-            LinearLayout.LayoutParams(0, dp(62), 1.35f),
+            LinearLayout.LayoutParams(dateWidth, dp(62)),
         )
         head.addView(
             ForecastMetricLabel(this, ForecastMetric.SKY),
@@ -492,14 +551,14 @@ class MainActivity : Activity() {
             row.addView(
                 WeekDayLabel(
                         this,
-                        Times.format(day.time, "EEE", place.zone),
-                        Times.format(day.time, "dd MMM", place.zone),
+                        labels[index].first,
+                        labels[index].second,
                     )
                     .apply {
                         minimumHeight = dp(64)
                         setBackgroundColor(Hud.legend)
                     },
-                LinearLayout.LayoutParams(0, -2, 1.35f),
+                LinearLayout.LayoutParams(dateWidth, -2),
             )
             row.addView(
                 WeatherGlyph(
@@ -578,11 +637,11 @@ class MainActivity : Activity() {
             ImageButton(this).apply {
                 setImageResource(R.drawable.ic_play)
                 contentDescription = "Play or pause radar animation"
-                setPadding(dp(12), dp(8), dp(12), dp(8))
+                setPadding(dp(4), dp(4), dp(4), dp(4))
                 background = null
                 setOnClickListener { setPlaying(!playing) }
             }
-        controls.addView(playButton, LinearLayout.LayoutParams(dp(48), dp(40)))
+        controls.addView(playButton, LinearLayout.LayoutParams(dp(48), dp(48)))
         timeline =
             RadarTimeline(this).apply {
                 onSelect = {
@@ -592,13 +651,153 @@ class MainActivity : Activity() {
             }
         controls.addView(
             timeline,
-            LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(8) },
+            LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(8) },
+        )
+        radarTime =
+            label("—", 12f, Hud.ink, true).apply {
+                tag = "radar-time"
+                gravity = Gravity.CENTER
+                contentDescription = "Radar frame unavailable"
+            }
+        controls.addView(
+            radarTime,
+            LinearLayout.LayoutParams(dp(60), dp(48)).apply { leftMargin = dp(8) },
         )
         radarPanel.addView(
             controls,
-            FrameLayout.LayoutParams(-1, dp(40), Gravity.BOTTOM),
+            FrameLayout.LayoutParams(-1, dp(48), Gravity.BOTTOM),
         )
+        overlayInfo =
+            label("", 10f, Hud.ink, true).apply {
+                setPadding(dp(6), dp(4), dp(6), dp(4))
+                setBackgroundColor(0xcf080f19.toInt())
+                visibility = View.GONE
+            }
+        radarPanel.addView(
+            overlayInfo,
+            FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply {
+                topMargin = dp(50)
+                rightMargin = dp(8)
+            },
+        )
+        overlayCredit =
+            label("Source: Deutscher Wetterdienst", 9f, Hud.muted).apply {
+                setPadding(dp(6), dp(4), dp(6), dp(4))
+                setBackgroundColor(0xcf080f19.toInt())
+                visibility = View.GONE
+                setOnClickListener {
+                    startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse("https://www.dwd.de/copyright"))
+                    )
+                }
+            }
+        radarPanel.addView(
+            overlayCredit,
+            FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply {
+                topMargin = dp(24)
+            },
+        )
+        val layers =
+            FrameLayout(this).apply {
+                tag = "radar-layers"
+                contentDescription = "Radar layers"
+                isClickable = true
+                isFocusable = true
+                background = panel(Hud.panel, Hud.line, dp(10).toFloat())
+                addView(
+                    SvgIcon(this@MainActivity, "layers").apply {
+                        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                    },
+                    FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER),
+                )
+                setOnClickListener { showLayers(this) }
+            }
+        radarPanel.addView(
+            layers,
+            FrameLayout.LayoutParams(dp(48), dp(48), Gravity.BOTTOM or Gravity.END).apply {
+                rightMargin = dp(16)
+                bottomMargin = dp(60)
+            },
+        )
+        map.overlayChanged = { updateOverlayInfo() }
         content.addView(radarPanel, FrameLayout.LayoutParams(-1, -1))
+    }
+
+    private fun showLayers(anchor: View) {
+        layerMenu?.dismiss()
+        val menu =
+            column().apply {
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                background = panel()
+            }
+        val popup =
+            PopupWindow(menu, dp(220), -2, true).apply {
+                isOutsideTouchable = true
+                setBackgroundDrawable(
+                    android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
+                )
+                elevation = dp(8).toFloat()
+            }
+        for ((index, pair) in
+            listOf(
+                    null to "Precipitation only",
+                    Overlay.CLOUDS to "Clouds",
+                    Overlay.TEMPERATURE to "Temperature",
+                )
+                .withIndex()) {
+            if (index > 0) menu.space(8)
+            val (overlay, name) = pair
+            val row =
+                row().apply {
+                    minimumHeight = dp(48)
+                    setPadding(dp(12), 0, dp(12), 0)
+                    background = panel(Hud.panel, Hud.line, dp(8).toFloat())
+                    contentDescription =
+                        "$name${if (selectedOverlay == overlay) ", selected" else ""}"
+                    isClickable = true
+                    isFocusable = true
+                    addView(
+                        SvgIcon(this@MainActivity, "layers").apply {
+                            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                        },
+                        LinearLayout.LayoutParams(dp(20), dp(20)).apply { rightMargin = dp(8) },
+                    )
+                    addView(label(name, 12f, Hud.ink, true))
+                    setOnClickListener {
+                        selectedOverlay = overlay
+                        popup.dismiss()
+                        anchor.announceForAccessibility("$name selected")
+                        updateRadarAccessibility()
+                    }
+                }
+            menu.addView(row, LinearLayout.LayoutParams(-1, dp(48)))
+        }
+        layerMenu = popup
+        popup.setOnDismissListener { if (layerMenu === popup) layerMenu = null }
+        popup.showAsDropDown(anchor, dp(48) - dp(220), -dp(48 + 3 * 48 + 2 * 8 + 16))
+    }
+
+    private fun updateOverlayInfo() {
+        if (!::overlayInfo.isInitialized) return
+        val selected = selectedOverlay
+        val active = map.overlaySelection
+        overlayInfo.visibility = if (selected == null) View.GONE else View.VISIBLE
+        overlayCredit.visibility = overlayInfo.visibility
+        if (selected != null) {
+            val product =
+                if (selected == Overlay.CLOUDS) "CLOUDS · IR 10.8 µm · 3h" else "2 m TEMP · °C"
+            val valid = active?.let { " · ${Times.format(it.time, "HH:mm", "UTC")}Z" } ?: ""
+            overlayInfo.text =
+                hudString(
+                    R.string.radar_overlay_info,
+                    product,
+                    valid,
+                    map.overlayNotice?.let { " · $it" } ?: "",
+                )
+            overlayCredit.text =
+                if (selected == Overlay.CLOUDS) "Source: Deutscher Wetterdienst · EUMETSAT/NOAA"
+                else "Source: Deutscher Wetterdienst"
+        }
     }
 
     private fun updateRadarNotice() {
@@ -620,13 +819,26 @@ class MainActivity : Activity() {
     private fun updateRadarAccessibility() {
         val seq = sequence
         val frame = seq?.frames?.getOrNull(frameIndex)
+        radarTime.text =
+            if (frameError) "—"
+            else frame?.let { Times.format(it.time, "HH:mm", repo.place.zone) } ?: "—"
+        radarTime.contentDescription =
+            if (frameError) "Radar frame unavailable"
+            else
+                frame?.let {
+                    "${Times.format(it.time, "EEEE dd MMM yyyy HH:mm z", repo.place.zone)}, " +
+                        if (it.lead > 0) "forecast +${it.lead} minutes" else "observation"
+                } ?: "Radar frame unavailable"
+        map.overlay(selectedOverlay, frame?.time ?: AppPlatform.now(), repo.online)
+        updateOverlayInfo()
         timeline.contentDescription =
             if (frame == null) "Radar timeline, waiting for frames"
             else {
                 val type = if (frame.lead > 0) "FORECAST +${frame.lead}m" else "OBSERVED"
                 val previous = seq.frames.getOrNull(frameIndex - 1)
                 val gap = previous != null && frame.time - previous.time > 300000
-                "Radar frame ${Times.format(frame.time, "dd MMM HH:mm z", repo.place.zone)}, $type, ${repo.radar.state.name}, ${seq.frames.size} frames${if (gap) ", gap before frame" else ""}"
+                val state = if (frameError) "unavailable" else repo.radar.state.name
+                "Radar frame ${Times.format(frame.time, "dd MMM HH:mm z", repo.place.zone)}, $type, $state, ${seq.frames.size} frames${if (gap) ", gap before frame" else ""}"
             }
     }
 
@@ -654,6 +866,8 @@ class MainActivity : Activity() {
         val frame = seq.frames.getOrNull(index) ?: return
         val token = ++decodeToken
         handler.removeCallbacks(advance)
+        frameIndex = index
+        timeline.selected = index
         val display: (Bitmap) -> Unit = { image ->
             if (!dead && token == decodeToken) {
                 frameError = false
@@ -670,8 +884,10 @@ class MainActivity : Activity() {
             display(it)
             return
         }
+        map.reset()
         frameError = false
         updateRadarNotice()
+        updateRadarAccessibility()
         decoder.execute {
             val image = BitmapFactory.decodeFile(frame.file)
             handler.post {
@@ -682,6 +898,10 @@ class MainActivity : Activity() {
                     } else if (token == decodeToken) {
                         setPlaying(false)
                         frameError = true
+                        map.reset()
+                        frameIndex = index
+                        timeline.selected = index
+                        updateRadarAccessibility()
                         updateRadarNotice()
                     }
                 }
@@ -723,20 +943,18 @@ class MainActivity : Activity() {
 
     private fun render() {
         repo.age()
-        ensureSolar(repo.place, System.currentTimeMillis())
+        ensureSolar(repo.place, AppPlatform.now())
         placeTitle.text = placeDisplayName(repo.place, repo.forecastPoint?.station)
         coordinates.text = coords(repo.place.lat, repo.place.lon)
         currentWeather.bind(
-            repo.forecast.data?.current(System.currentTimeMillis()),
+            repo.forecast.data?.current(AppPlatform.now()),
             repo.forecast.state,
             repo.place.zone,
         )
-        placeCredit.visibility = if (repo.place.geocodeId == null) View.GONE else View.VISIBLE
-        if (repo.place.geocodeId != null) placeCredit.text = placeCreditText(repo.place)
         if (
             forecastVersion != repo.forecast ||
                 lastForecastPlace != repo.place ||
-                lastForecastDay != Times.day(System.currentTimeMillis(), repo.place.zone)
+                lastForecastDay != Times.day(AppPlatform.now(), repo.place.zone)
         ) {
             forecastVersion = repo.forecast
             lastForecastPlace = repo.place
@@ -746,7 +964,7 @@ class MainActivity : Activity() {
     }
 
     private fun refresh() {
-        lastRefresh = System.currentTimeMillis()
+        lastRefresh = AppPlatform.now()
         repo.connection()
         repo.refreshForecast()
         repo.refreshRadar()
@@ -768,13 +986,13 @@ class MainActivity : Activity() {
         placeChoices.invalidate()
         map.place = place
         setPlaying(false)
-        lastRefresh = System.currentTimeMillis()
+        lastRefresh = AppPlatform.now()
         repo.select(place)
         return true
     }
 
     private fun locations() {
-        val body = column().apply { pad(20) }
+        val body = column().apply { setPadding(dp(20), dp(20), dp(20), 0) }
         placesScroll.removeAllViews()
         placesScroll.addView(body)
         body.addView(action("SEARCH CITY") { placeChoices.searchCity() })
@@ -786,10 +1004,6 @@ class MainActivity : Activity() {
         body.addView(label("FAVOURITES", 11f, Hud.cyan, true))
         body.space(10)
         val favourites = store.favourites()
-        if (favourites.any { it.geocodeId != null }) {
-            body.addView(placeCreditView())
-            body.space(6)
-        }
         if (favourites.isEmpty())
             body.addView(label("Saved places will appear here.", 13f, Hud.muted))
         favourites.forEach { place ->
@@ -802,8 +1016,14 @@ class MainActivity : Activity() {
                         if (choose(place)) showPage(Page.TODAY)
                     },
                     delete = {
-                        store.delete(place)
-                        locations()
+                        if (store.delete(place)) locations()
+                        else
+                            Toast.makeText(
+                                    this,
+                                    "Favourite could not be deleted. Please retry.",
+                                    Toast.LENGTH_LONG,
+                                )
+                                .show()
                     },
                 )
             )
@@ -818,6 +1038,13 @@ class MainActivity : Activity() {
                 notices()
             }
         )
+        body.space(16)
+        body.addView(
+            label("Drizziq ${BuildConfig.VERSION_NAME}", 11f, Hud.muted).apply {
+                gravity = Gravity.CENTER
+                setPadding(0, 0, 0, dp(12))
+            }
+        )
     }
 
     private fun notices() {
@@ -828,11 +1055,15 @@ class MainActivity : Activity() {
                     android.text.util.Linkify.addLinks(this, android.text.util.Linkify.WEB_URLS)
                     movementMethod = android.text.method.LinkMovementMethod.getInstance()
                 }
-        AlertDialog.Builder(this)
-            .setTitle("Data & licences")
-            .setView(ScrollView(this).apply { addView(text) })
-            .setPositiveButton("Close", null)
-            .show()
+        val dialog =
+            AlertDialog.Builder(this)
+                .setTitle("Data & licences")
+                .setView(ScrollView(this).apply { addView(text) })
+                .setPositiveButton("Close", null)
+                .create()
+        dialog.setOnDismissListener { if (noticesDialog === dialog) noticesDialog = null }
+        noticesDialog = dialog
+        dialog.show()
     }
 
     private fun field(
@@ -872,17 +1103,15 @@ class MainActivity : Activity() {
         body.space(12)
         val zone = field(body, "TIME ZONE (IANA ID)", "")
         val dialog =
-            AlertDialog.Builder(this)
-                .setTitle("Time zone")
-                .setView(body)
-                .setNegativeButton("Cancel") { _, _ -> placeChoices.cancel(token) }
-                .setPositiveButton("Use place", null)
-                .create()
+            placeDialog(
+                AlertDialog.Builder(this).setView(body).setPositiveButton("Use place", null),
+                "Time zone",
+            )
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 if (!placeChoices.isCurrent(token)) return@setOnClickListener
                 val value = zone.text.toString().trim()
-                if (value !in TimeZone.getAvailableIDs()) {
+                if (!Zones.valid(value)) {
                     zone.error = "Use a valid IANA zone, such as Europe/Berlin"
                     return@setOnClickListener
                 }
@@ -906,12 +1135,10 @@ class MainActivity : Activity() {
                 placeDisplayName(repo.place, repo.forecastPoint?.station),
             )
         val dialog =
-            AlertDialog.Builder(this)
-                .setTitle("Save favourite")
-                .setView(body)
-                .setNegativeButton("Cancel") { _, _ -> placeChoices.cancel(token) }
-                .setPositiveButton("Save", null)
-                .create()
+            placeDialog(
+                AlertDialog.Builder(this).setView(body).setPositiveButton("Save", null),
+                "Save favourite",
+            )
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val label = compactPlaceLabel(name.text.toString().trim())
@@ -944,10 +1171,21 @@ class MainActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
+        started = true
+        stopped = false
         placeChoices.foreground(true)
+        if (ready) {
+            val changedWhileStopped = networkChangedWhileStopped
+            networkChangedWhileStopped = false
+            val was = repo.online
+            val online = repo.connection()
+            if (online && (!was || changedWhileStopped)) refresh()
+        }
     }
 
     override fun onStop() {
+        started = false
+        stopped = true
         placeChoices.foreground(false)
         solarGeneration.next()
         solarFuture?.cancel(true)
@@ -967,10 +1205,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         active = true
-        if (ready) {
-            repo.connection()
-            handler.post(tick)
-        }
+        if (ready) handler.post(tick)
     }
 
     override fun onPause() {
@@ -983,12 +1218,17 @@ class MainActivity : Activity() {
 
     override fun onSaveInstanceState(out: Bundle) {
         out.putString("page", page.name)
+        selectedOverlay?.let { out.putString("radar-overlay", it.name) }
         super.onSaveInstanceState(out)
     }
 
     override fun onDestroy() {
         dead = true
         ready = false
+        started = false
+        layerMenu?.dismiss()
+        noticesDialog?.dismiss()
+        noticesDialog = null
         placeChoices.close()
         progressSubscription?.cancel()
         progressSubscription = null

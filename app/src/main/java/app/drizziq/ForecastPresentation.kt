@@ -2,7 +2,7 @@ package app.drizziq
 
 import java.util.Locale
 
-/** A complete local civil day, including earlier DWD issues where available. */
+/** Local midnight through tomorrow's civil noon, preserving real source validity instants. */
 data class HourlyColumn(val time: Long, val hour: Hour?)
 
 fun currentHourColumn(columns: List<HourlyColumn>, now: Long): Int =
@@ -12,16 +12,18 @@ fun hourlyColumns(forecast: Forecast, now: Long, zone: String): List<HourlyColum
     val tz = java.time.ZoneId.of(zone)
     val date = java.time.Instant.ofEpochMilli(now).atZone(tz).toLocalDate()
     val start = date.atStartOfDay(tz).toInstant().toEpochMilli()
-    val end = date.plusDays(1).atStartOfDay(tz).toInstant().toEpochMilli()
+    val end = date.plusDays(1).atTime(12, 0).atZone(tz).toInstant().toEpochMilli()
     val byTime = (forecast.earlier + forecast.hours).associateBy { it.time }
-    val times = sortedSetOf(start)
+    val times = sortedSetOf(start, end)
     var time = Math.floorDiv(start, 3600000L) * 3600000L + 3600000L
-    while (time < end) {
+    while (time <= end) {
         times += time
         time += 3600000L
     }
     // Preserve real source validity instants in fractional-offset zones; never round/interpolate.
-    forecast.hours.filter { it.time >= start && it.time < end }.forEach { times += it.time }
+    (forecast.earlier + forecast.hours)
+        .filter { it.time in start..end }
+        .forEach { times += it.time }
     return times.map { HourlyColumn(it, byTime[it]) }
 }
 

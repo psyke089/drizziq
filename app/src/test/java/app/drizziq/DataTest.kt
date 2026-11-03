@@ -56,6 +56,75 @@ class DataTest {
     }
 
     @Test
+    fun skippedAndRepeatedLocalMidnights_stillFormCompleteCorrectLengthDays() {
+        val santiago = day("America/Santiago", "2026-09-06")
+        assertTrue(santiago.complete)
+        assertEquals(23, santiago.hours.size)
+        assertEquals(23.0, santiago.rain!!, 0.0)
+
+        val havana = day("America/Havana", "2026-11-01")
+        assertTrue(havana.complete)
+        assertEquals(25, havana.hours.size)
+        assertEquals(25.0, havana.rain!!, 0.0)
+
+        val berlinSpring = day("Europe/Berlin", "2026-03-29")
+        assertTrue(berlinSpring.complete)
+        assertEquals(23, berlinSpring.hours.size)
+
+        val berlinAutumn = day("Europe/Berlin", "2026-10-25")
+        assertTrue(berlinAutumn.complete)
+        assertEquals(25, berlinAutumn.hours.size)
+    }
+
+    @Test
+    fun incompleteSourceIntervals_neverProduceDailyTotals() {
+        val date = java.time.LocalDate.parse("2026-10-25")
+        val zone = "Europe/Berlin"
+        val hours = hoursFor(date, zone)
+        val forecast = Forecast(Station("t", "t", 0.0, 0.0, null), 0L, hours)
+        val now = hours.first().time
+        for (incomplete in
+            listOf(
+                hours.drop(1),
+                hours.dropLast(1),
+                hours.filterIndexed { i, _ -> i != 5 },
+            )) {
+            val day = forecast.copy(hours = incomplete).days(now, zone).single()
+            assertFalse(day.complete)
+            assertNull(day.rain)
+        }
+    }
+
+    @Test
+    fun times_formatRejectsIncompatibleLegacyZonesInsteadOfUsingGmt() {
+        assertThrows(java.time.DateTimeException::class.java) {
+            Times.format(0, "HH:mm", "PST")
+        }
+        assertThrows(java.time.DateTimeException::class.java) { Times.day(0, "PST") }
+    }
+
+    private fun hoursFor(
+        date: java.time.LocalDate,
+        zone: String,
+        value: Double = 1.0,
+    ): List<Hour> {
+        val tz = java.time.ZoneId.of(zone)
+        val start = date.atStartOfDay(tz).toInstant().toEpochMilli()
+        val end = date.plusDays(1).atStartOfDay(tz).toInstant().toEpochMilli()
+        return generateSequence(start + 3600000L) { it + 3600000L }
+            .takeWhile { it <= end }
+            .map { Hour(it, mapOf("RR1c" to value)) }
+            .toList()
+    }
+
+    private fun day(zone: String, date: String): Day {
+        val hours = hoursFor(java.time.LocalDate.parse(date), zone)
+        return Forecast(Station("t", "t", 0.0, 0.0, null), 0L, hours)
+            .days(hours.first().time, zone)
+            .single()
+    }
+
+    @Test
     fun currentOdimUint32DataAndProjectionDecode() {
         val radar =
             Odim.decode(javaClass.getResourceAsStream("/rv-observed-20261022.h5")!!.readBytes())

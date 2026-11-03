@@ -116,6 +116,17 @@ class GeocodingTest {
     }
 
     @Test
+    fun zone_rejectsJavaTimeIncompatibleLegacyAliases() {
+        assertNull(Geocoding.zone("PST", 0.0, 0.0) { _, _ -> null })
+        assertEquals("Europe/Berlin", Geocoding.zone("PST", 0.0, 0.0) { _, _ -> "Europe/Berlin" })
+        assertNull(Geocoding.zone("PST", 0.0, 0.0) { _, _ -> "CST" })
+        assertEquals(
+            "Europe/Berlin",
+            Geocoding.zone("Europe/Berlin", 0.0, 0.0) { _, _ -> error("unused") },
+        )
+    }
+
+    @Test
     fun cache_expiryBoundaryLruAndClear_followMonotonicClock() {
         var now = 0L
         val cache = SearchCache({ now }, capacity = 2, ttlMillis = 100)

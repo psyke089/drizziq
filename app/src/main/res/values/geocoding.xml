@@ -1,7 +1,7 @@
 <resources>
     <string name="city_search_title">Search city</string>
-    <string name="city_search_disclosure">City search sends your query to Open-Meteo. Select a result to use its coordinates.</string>
-    <string name="city_search_hint">Enter a city name, then Search.</string>
+    <string name="city_search_disclosure">City search sends your query to Open-Meteo after you stop typing. Select a result to use its coordinates.</string>
+    <string name="city_search_hint">Enter a city name. Search runs after a short pause; use keyboard Search to retry.</string>
     <string name="city_search_waiting">Searching…</string>
     <string name="city_search_empty">No matches. Try another city.</string>
     <string name="city_search_cached">Cached results — select a place</string>
