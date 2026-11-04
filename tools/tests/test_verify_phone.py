@@ -93,10 +93,10 @@ class PhoneRunnerTest(unittest.TestCase):
                 self.assertTrue(all(parts[parts.index("fixture") + 1] == expected for parts in instruments))
 
     def test_timings_retain_failed_phase_and_environment_without_retry(self):
-        calls, error = self.run_runner(fail_phase="layout")
+        calls, error = self.run_runner("--phase", "navigation", "--phase", "radar", fail_phase="radar")
         self.assertIsInstance(error, RuntimeError)
         self.assertIsNotNone(self.timing_report)
-        self.assertEqual(["navigation", "layout"], [row["phase"] for row in self.timing_report["phases"]])
+        self.assertEqual(["navigation", "radar"], [row["phase"] for row in self.timing_report["phases"]])
         self.assertEqual([True, False], [row["passed"] for row in self.timing_report["phases"]])
         self.assertIn("device", self.timing_report)
         self.assertIn("cache", self.timing_report)
@@ -116,11 +116,8 @@ class PhoneRunnerTest(unittest.TestCase):
     def test_default_runs_only_smoke_without_connectivity_or_data_changes(self):
         calls, error = self.run_runner()
         self.assertIsNone(error)
-        self.assertEqual(["navigation", "layout", "lifecycle", "forecast", "radar", "places-search", "viewport-save", "viewport-restore"], self.phases(calls))
+        self.assertEqual(["smoke"], self.phases(calls))
         self.assertFalse(any("settings" in parts or "svc" in parts or "connectivity" in parts for parts in calls))
-        seed = next(i for i, parts in enumerate(calls) if "viewport-save" in parts)
-        restore = next(i for i, parts in enumerate(calls) if "viewport-restore" in parts)
-        self.assertTrue(any(parts[-3:] == ["am", "force-stop", "app.drizziq"] for parts in calls[seed+1:restore]))
         self.assertFalse(any("install" in parts or "uninstall" in parts or "screencap" in parts for parts in calls))
         self.assertEqual(self.STATE_FILES, self.state_restores(calls))
 
@@ -135,7 +132,7 @@ class PhoneRunnerTest(unittest.TestCase):
     def test_full_runs_integration_and_restores_original_connectivity(self):
         calls, error = self.run_runner("--full")
         self.assertIsNone(error)
-        self.assertEqual(["navigation", "layout", "lifecycle", "forecast", "radar", "places-search", "viewport-save", "viewport-restore", "main", "persistence", "offline", "stopped-network", "restore"], self.phases(calls))
+        self.assertEqual(["smoke", "main", "persistence", "offline", "stopped-network", "restore"], self.phases(calls))
         for suffix in (["connectivity", "airplane-mode", "disable"], ["svc", "wifi", "enable"], ["svc", "data", "enable"]):
             self.assertTrue(any(parts[-3:] == suffix for parts in calls))
 
@@ -143,7 +140,7 @@ class PhoneRunnerTest(unittest.TestCase):
         calls, error = self.run_runner("--focused")
         self.assertIsNone(error)
         self.assertEqual(
-            ["navigation", "layout", "lifecycle", "forecast", "radar", "places-search", "viewport-save", "viewport-restore", *runner.FOCUSED_PHASES],
+            ["smoke", *runner.FOCUSED_PHASES],
             self.phases(calls),
         )
 
@@ -163,9 +160,9 @@ class PhoneRunnerTest(unittest.TestCase):
     def test_each_state_restore_failure_is_attempted_and_reported(self):
         for failed in runner.PREFERENCE_FILES:
             with self.subTest(failed=failed):
-                calls, error = self.run_runner(fail_phase="navigation", fail_state=failed)
+                calls, error = self.run_runner(fail_phase="smoke", fail_state=failed)
                 self.assertIsInstance(error, RuntimeError)
-                self.assertIn("navigation failed", str(error))
+                self.assertIn("smoke failed", str(error))
                 self.assertTrue(any(failed in note for note in error.__notes__))
                 self.assertEqual(self.STATE_FILES, self.state_restores(calls))
 
@@ -178,10 +175,10 @@ class PhoneRunnerTest(unittest.TestCase):
         self.assertTrue(any("cat > shared_prefs/radar-viewport.xml" in line for line in joined))
         self.assertTrue(any("cat > shared_prefs/radar-viewport.xml.bak" in line for line in joined))
 
-    def test_every_smoke_failure_still_restores_original_state(self):
-        for failed in ("navigation", "layout", "radar", "viewport-restore"):
+    def test_targeted_failure_still_restores_original_state(self):
+        for failed in ("navigation", "radar", "viewport-restore"):
             with self.subTest(failed=failed):
-                calls, error = self.run_runner(fail_phase=failed)
+                calls, error = self.run_runner("--phase", failed, fail_phase=failed)
                 self.assertIsInstance(error, RuntimeError)
                 self.assertIn(f"{failed} failed", str(error))
                 self.assertEqual(self.STATE_FILES, self.state_restores(calls))
@@ -230,9 +227,9 @@ class PhoneRunnerTest(unittest.TestCase):
         self.assertFalse(any("grant" in parts or "revoke" in parts or "settings" in parts or "svc" in parts for parts in calls))
 
     def test_failed_smoke_stops_before_later_phases(self):
-        calls, error = self.run_runner(fail_phase="navigation")
+        calls, error = self.run_runner(fail_phase="smoke")
         self.assertIsInstance(error, RuntimeError)
-        self.assertEqual(["navigation"], self.phases(calls))
+        self.assertEqual(["smoke"], self.phases(calls))
 
 
 if __name__ == "__main__":

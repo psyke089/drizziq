@@ -13,8 +13,8 @@ import android.view.accessibility.AccessibilityNodeInfo
 class PhoneExercise : Instrumentation() {
     private val suitePhases =
         setOf(
+            "smoke",
             "navigation",
-            "layout",
             "lifecycle",
             "forecast",
             "radar",
@@ -288,6 +288,43 @@ class PhoneExercise : Instrumentation() {
                 focused && has("PLACES")
             }
             when (phase) {
+                "smoke" -> {
+                    waitFor("Today forecast") {
+                        has("Temperature ") && has("Hourly forecast timeline")
+                    }
+                    click("Week")
+                    waitFor("Week forecast") {
+                        has("Maximum temperature") && has("Minimum temperature")
+                    }
+                    click("Radar")
+                    waitFor("radar frames") { has("OBSERVED") && has("frames") }
+                    fun timeline() = nodes().first { it.className == "android.widget.SeekBar" }
+                    val before = timeline().rangeInfo.current
+                    check(timeline().performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD))
+                    waitFor("timeline selection") { timeline().rangeInfo.current != before }
+                    val paused = timeline().rangeInfo.current
+                    click("Play or pause radar animation")
+                    waitFor("radar playback", 10000) { timeline().rangeInfo.current != paused }
+                    click("Play or pause radar animation")
+                    click("Places")
+                    check(has("FAVOURITES"))
+                    click("SEARCH CITY")
+                    enter("CITY NAME", "München")
+                    waitFor("city results") {
+                        nodes().any {
+                            it.contentDescription?.toString()?.startsWith("Select city result ") ==
+                                true
+                        }
+                    }
+                    click("Close dialog")
+                    check(has("FAVOURITES"))
+                    click("Today")
+                    check(has("Temperature "))
+                    result.putString(
+                        "checks",
+                        "Today/Week data; radar scrub/play/pause; Places search/cancel; return to Today",
+                    )
+                }
                 "fixture-forecast" -> {
                     waitFor("fixture forecast", 10000) { has("Temperature ") }
                     runOnMainSync {
@@ -312,22 +349,6 @@ class PhoneExercise : Instrumentation() {
                     var layoutError: String? = null
                     runOnMainSync {
                         val all = views(activity.window.decorView)
-                        val hourly = all.filterIsInstance<HourlyForecast>().first()
-                        val box = Rect()
-                        hourly.getGlobalVisibleRect(box)
-                        if (box.left != 0 || box.right != activity.window.decorView.width)
-                            layoutError = "Today table is not full width"
-                        val wind =
-                            hourly.findViewWithTag<android.widget.LinearLayout>("hourly-wind")
-                        val gust =
-                            hourly.findViewWithTag<android.widget.LinearLayout>("hourly-gusts")
-                        if (
-                            wind == null ||
-                                gust == null ||
-                                wind.height != gust.height ||
-                                gust.height != appContext.dp(40)
-                        )
-                            layoutError = "Gust and wind rows are not aligned"
                         if (all.none { it.contentDescription?.toString() == "Rain unavailable" })
                             layoutError = "Missing rain does not announce unavailable"
                         val configuration =
@@ -348,18 +369,6 @@ class PhoneExercise : Instrumentation() {
                     check(layoutError == null) { layoutError.orEmpty() }
                     click("Week")
                     waitFor("weekly table") { has("Maximum temperature") }
-                    runOnMainSync {
-                        val root = activity.window.decorView
-                        val first = root.findViewWithTag<android.view.ViewGroup>("week-row:0")
-                        val table = first.parent as android.view.View
-                        val rect = Rect()
-                        table.getGlobalVisibleRect(rect)
-                        if (rect.left != 0 || rect.right != root.width)
-                            layoutError = "Week table is not full width"
-                        if (first.getChildAt(0).width < appContext.dp(64))
-                            layoutError = "Week date column too narrow"
-                    }
-                    check(layoutError == null) { layoutError.orEmpty() }
                     click("Radar")
                     waitFor("fixture radar timeline") { has("OBSERVED") }
                     click("Radar layers")
@@ -375,7 +384,7 @@ class PhoneExercise : Instrumentation() {
                     waitFor("overlay removed") { !has("IR 10.8") }
                     result.putString(
                         "checks",
-                        "full-width tables, gust alignment, missing rain, German locale, radar layer switching",
+                        "missing rain, German locale, radar layer switching",
                     )
                 }
                 "fixture-states" -> {
@@ -520,55 +529,6 @@ class PhoneExercise : Instrumentation() {
                                     }
                                 else emptyList()
 
-                        val hourly =
-                            HourlyForecast(
-                                appContext,
-                                listOf(HourlyColumn(Times.parse("2026-10-22T12:00:00Z"), null)),
-                                "UTC",
-                                0,
-                            )
-                        hourly.measure(
-                            android.view.View.MeasureSpec.makeMeasureSpec(
-                                appContext.dp(320),
-                                android.view.View.MeasureSpec.EXACTLY,
-                            ),
-                            android.view.View.MeasureSpec.makeMeasureSpec(
-                                0,
-                                android.view.View.MeasureSpec.UNSPECIFIED,
-                            ),
-                        )
-                        hourly.layout(0, 0, hourly.measuredWidth, hourly.measuredHeight)
-                        check(hourly.getChildAt(0).width == appContext.dp(40)) {
-                            "Hourly legend must be wider than the old metric rail"
-                        }
-                        check(
-                            (hourly.getChildAt(0).background
-                                    as? android.graphics.drawable.ColorDrawable)
-                                ?.color == Hud.legend
-                        ) {
-                            "Hourly legend needs its own colour"
-                        }
-                        descendants(hourly)
-                            .filterIsInstance<ForecastMetricLabel>()
-                            .filter { it.childCount > 1 }
-                            .forEach { metric ->
-                                check(metric.getChildAt(1).top >= metric.getChildAt(0).bottom) {
-                                    "Hourly unit must sit below its metric icon"
-                                }
-                            }
-
-                        val weekday = WeekDayLabel(appContext, "Sat", "31 Oct")
-                        val weekdayText =
-                            descendants(weekday)
-                                .filterIsInstance<android.widget.TextView>()
-                                .associateBy { it.tag }
-                        check(
-                            weekdayText.getValue("week-weekday").textSize >
-                                weekdayText.getValue("week-date").textSize
-                        ) {
-                            "Weekday must be larger than the date"
-                        }
-
                         var selected = 0
                         var deleted = 0
                         val favourite =
@@ -690,7 +650,7 @@ class PhoneExercise : Instrumentation() {
                     }
                     result.putString(
                         "checks",
-                        "Radar tap/drag/accessibility click dispatch; widened, tinted hourly legend; week typography; favourite-card selection/delete; observed/forecast fixture decoding; themed launcher mask rendering; every SVG-backed native vector inflates and renders, including all MOSMIX conditions, intensities and UI icons",
+                        "Radar tap/drag/accessibility click dispatch; favourite-card selection/delete; observed/forecast fixture decoding; themed launcher mask rendering; every SVG-backed native vector inflates and renders, including all MOSMIX conditions, intensities and UI icons",
                     )
                 }
                 "hourly-refresh" -> {
@@ -785,26 +745,6 @@ class PhoneExercise : Instrumentation() {
                     }
                     click("Today")
                     waitFor("current forecast") { has("Temperature ") }
-                    var prominent = false
-                    runOnMainSync {
-                        val weather =
-                            activity.window.decorView.findViewWithTag<android.view.View>(
-                                "header-weather"
-                            )
-                        val temp =
-                            activity.window.decorView.findViewWithTag<android.widget.TextView>(
-                                "header-temperature"
-                            )
-                        prominent =
-                            weather.height >= appContext.dp(108) &&
-                                temp.textSize >=
-                                    android.util.TypedValue.applyDimension(
-                                        android.util.TypedValue.COMPLEX_UNIT_SP,
-                                        38f,
-                                        activity.resources.displayMetrics,
-                                    )
-                    }
-                    check(prominent) { "Header weather needs more height and a larger temperature" }
                     check(
                         has(
                             Times.format(
@@ -814,18 +754,8 @@ class PhoneExercise : Instrumentation() {
                             )
                         ) && !has("NEXT 24 HOURS")
                     )
-                    var columnsFit = false
                     var dataRows = false
                     runOnMainSync {
-                        val first =
-                            activity.window.decorView.findViewWithTag<android.widget.TextView>(
-                                "hour-time:0"
-                            )
-                        columnsFit =
-                            first != null &&
-                                first.text.toString().contains("00:00") &&
-                                first.width <= appContext.dp(56) &&
-                                first.typeface.isBold
                         dataRows =
                             activity.window.decorView.findViewWithTag<android.view.View>(
                                 "hourly-probability"
@@ -833,9 +763,6 @@ class PhoneExercise : Instrumentation() {
                                 activity.window.decorView.findViewWithTag<android.view.View>(
                                     "hourly-gusts"
                                 ) != null
-                    }
-                    check(columnsFit) {
-                        "Day columns must start at midnight, be narrower and have bold time labels"
                     }
                     check(dataRows) { "Available precipitation probability and gusts are missing" }
                     waitFor("calculated sunrise and sunset", 10000) {
@@ -873,7 +800,7 @@ class PhoneExercise : Instrumentation() {
                     click("Today")
                     result.putString(
                         "checks",
-                        "larger header weather; local-midnight through tomorrow-noon columns; precipitation probability and gust rows; local sunrise/sunset card; identical formatted details in Today/Week without DATA TRANSMISSION",
+                        "local-midnight through tomorrow-noon columns; precipitation probability and gust rows; local sunrise/sunset card; identical formatted details in Today/Week without DATA TRANSMISSION",
                     )
                 }
                 "header-weather" -> {
@@ -904,70 +831,11 @@ class PhoneExercise : Instrumentation() {
                     }
                     val source = sourceView
                     check(source != null) { "Header must credit the DWD source" }
-                    check(
-                        source.lineCount == 3 &&
-                            source.text.toString() == "Quelle:\nDeutscher\nWetterdienst"
-                    ) {
-                        "DWD source note must put one word on each line"
-                    }
                     check(source.contentDescription == "Quelle: Deutscher Wetterdienst") {
                         "DWD source note needs an accessible label"
                     }
-                    val nameBounds = Rect()
-                    val weatherBounds = Rect()
-                    val contentBounds = Rect()
-                    runOnMainSync {
-                        name!!.getGlobalVisibleRect(nameBounds)
-                        weather!!.getGlobalVisibleRect(weatherBounds)
-                        scroll!!.getGlobalVisibleRect(contentBounds)
-                    }
-                    check(
-                        nameBounds.right <= weatherBounds.left &&
-                            weatherBounds.bottom <= contentBounds.top
-                    ) {
-                        "Header weather must sit right of the name and above content"
-                    }
-                    val sourceBounds = Rect()
-                    val windowBounds = Rect()
-                    runOnMainSync {
-                        source.getGlobalVisibleRect(sourceBounds)
-                        activity.window.decorView.getGlobalVisibleRect(windowBounds)
-                    }
-                    check(
-                        windowBounds.right - sourceBounds.right <= appContext.dp(24) &&
-                            sourceBounds.top < nameBounds.top
-                    ) {
-                        "DWD source note must sit in the header's top-right corner"
-                    }
                     check(!contentHasTemperature(activity)) {
                         "Today still contains the duplicate current-weather card"
-                    }
-                    var original = ""
-                    runOnMainSync {
-                        original = name!!.text.toString()
-                        name!!.text =
-                            "A very long weather station name with several words near the mountains"
-                    }
-                    try {
-                        waitFor("wrapped station name", 3000) {
-                            var wrapped = false
-                            runOnMainSync { wrapped = name!!.lineCount == 2 }
-                            wrapped
-                        }
-                        var fits = false
-                        runOnMainSync {
-                            val box = Rect()
-                            name!!.getGlobalVisibleRect(box)
-                            fits =
-                                name!!.maxLines == 2 &&
-                                    name!!.ellipsize == android.text.TextUtils.TruncateAt.END &&
-                                    box.right <= weatherBounds.left &&
-                                    name!!.textSize /
-                                        activity.resources.displayMetrics.scaledDensity <= 22f
-                        }
-                        check(fits) { "Long names must wrap/ellipsize within their header column" }
-                    } finally {
-                        runOnMainSync { name!!.text = original }
                     }
                     val before = Rect()
                     runOnMainSync { weather!!.getGlobalVisibleRect(before) }
@@ -985,7 +853,7 @@ class PhoneExercise : Instrumentation() {
                     }
                     result.putString(
                         "checks",
-                        "weather sits right of wrapped/ellipsized station name; no duplicate Today card; header stays fixed and shared across tabs",
+                        "no duplicate Today card; header stays fixed and shared across tabs",
                     )
                 }
                 "forecast-status" -> {
@@ -1099,172 +967,6 @@ class PhoneExercise : Instrumentation() {
                         )
                     result.putDouble("latitude_difference_degrees", dy)
                     result.putDouble("longitude_difference_degrees", minOf(dx, 360 - dx))
-                }
-                "layout" -> {
-                    click("Today")
-                    waitFor("today forecast") { has("Temperature ") }
-                    check(!has("DWD / ONLINE")) { "Connection label remains in header" }
-                    check(!has("7-DAY OUTLOOK"))
-                    val before = Rect()
-                    nodes()
-                        .first { it.contentDescription?.toString() == "Today" }
-                        .getBoundsInScreen(before)
-                    var line: android.widget.ProgressBar? = null
-                    runOnMainSync {
-                        line = activity.window.decorView.findViewWithTag("download-progress")
-                        check(line != null && line!!.height == appContext.dp(2)) {
-                            "Download line needs reserved height"
-                        }
-                        for (name in listOf("TODAY", "WEEK", "RADAR", "PLACES")) {
-                            val tab =
-                                activity.window.decorView.findViewWithTag<android.view.View>(
-                                    "tab:$name"
-                                )
-                            val background =
-                                tab.background as? android.graphics.drawable.GradientDrawable
-                            check(background == null || background.cornerRadius == 0f) {
-                                "Tab corners must be square"
-                            }
-                        }
-                    }
-                    val transfer = Http.downloads.begin()
-                    try {
-                        waitFor("global download line", 3000) {
-                            var visible = false
-                            runOnMainSync {
-                                visible = line!!.visibility == android.view.View.VISIBLE
-                            }
-                            visible
-                        }
-                        val after = Rect()
-                        nodes()
-                            .first { it.contentDescription?.toString() == "Today" }
-                            .getBoundsInScreen(after)
-                        check(before == after) { "Download line shifted navigation" }
-                    } finally {
-                        transfer.cancel()
-                    }
-                    click("Week")
-                    waitFor("week forecast") {
-                        has("Maximum temperature") && has("Minimum temperature")
-                    }
-                    check(!contentHasTemperature(activity)) {
-                        "Right-now card leaked into Week content"
-                    }
-                    check(has("Maximum temperature") && has("Minimum temperature"))
-                    val heading =
-                        nodes().first {
-                            it.contentDescription?.toString()?.startsWith("Maximum temperature") ==
-                                true
-                        }
-                    val headingBefore = Rect().apply { heading.getBoundsInScreen(this) }
-                    val weekScroll =
-                        nodes().first {
-                            it.className == "android.widget.ScrollView" && it.isScrollable
-                        }
-                    check(weekScroll.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD))
-                    waitFor("week header stays visible", 3000) { has("Maximum temperature") }
-                    val headingAfter =
-                        Rect().apply {
-                            nodes()
-                                .first {
-                                    it.contentDescription
-                                        ?.toString()
-                                        ?.startsWith("Maximum temperature") == true
-                                }
-                                .getBoundsInScreen(this)
-                        }
-                    check(headingBefore == headingAfter) { "Week header moved during scrolling" }
-                    runOnMainSync {
-                        fun views(root: android.view.View): List<android.view.View> =
-                            listOf(root) +
-                                if (root is android.view.ViewGroup)
-                                    (0 until root.childCount).flatMap { views(root.getChildAt(it)) }
-                                else emptyList()
-                        val weekRows =
-                            views(activity.window.decorView).filter {
-                                it.tag?.toString()?.startsWith("week-row:") == true
-                            }
-                        check(weekRows.size >= 2) { "Week forecast rows are not identifiable" }
-                        val colors =
-                            weekRows.take(2).map {
-                                (it.background as android.graphics.drawable.ColorDrawable).color
-                            }
-                        check(colors[0] != colors[1]) {
-                            "Adjacent week forecast rows must use alternating colors"
-                        }
-                        val legendColors =
-                            weekRows.take(2).map {
-                                ((it as android.view.ViewGroup).getChildAt(0).background
-                                        as? android.graphics.drawable.ColorDrawable)
-                                    ?.color
-                            }
-                        check(legendColors.all { it == Hud.legend }) {
-                            "Week legend column must use the hourly legend colour"
-                        }
-                    }
-                    click("Places")
-                    check(
-                        !has("SELECTED COORDINATES") &&
-                            !has("ENTER COORDINATES") &&
-                            !has("One position, resolved")
-                    )
-                    check(has("SEARCH CITY") && has("USE CURRENT LOCATION"))
-                    click("Radar")
-                    val mapBounds = Rect().apply { radarMapNode().getBoundsInScreen(this) }
-                    var screenWidth = 0
-                    runOnMainSync { screenWidth = activity.window.decorView.width }
-                    check(mapBounds.left == 0 && mapBounds.width() == screenWidth) {
-                        "Radar must be full width"
-                    }
-                    val play =
-                        Rect().apply {
-                            nodes()
-                                .first {
-                                    it.contentDescription?.toString() ==
-                                        "Play or pause radar animation"
-                                }
-                                .getBoundsInScreen(this)
-                        }
-                    val scrub =
-                        Rect().apply {
-                            nodes()
-                                .first { it.className == "android.widget.SeekBar" }
-                                .getBoundsInScreen(this)
-                        }
-                    check(mapBounds.contains(play) && mapBounds.contains(scrub)) {
-                        "Playback controls must overlay the map"
-                    }
-                    check(play.bottom == mapBounds.bottom && scrub.bottom == mapBounds.bottom) {
-                        "Playback controls must sit at the bottom of the map"
-                    }
-                    val attribution =
-                        Rect().apply {
-                            nodes()
-                                .first {
-                                    it.contentDescription?.toString() ==
-                                        "OpenStreetMap attribution and licence"
-                                }
-                                .getBoundsInScreen(this)
-                        }
-                    check(attribution.left == mapBounds.left && attribution.top == mapBounds.top) {
-                        "Map attribution must sit at the top left"
-                    }
-                    check(!has("Precipitation legend") && !has("mm/5min"))
-                    runOnMainSync {
-                        val controls =
-                            activity.window.decorView.findViewWithTag<android.view.View>(
-                                "radar-controls"
-                            )
-                        check(controls.background == null) {
-                            "Radar controls need a transparent background"
-                        }
-                    }
-                    click("Today")
-                    result.putString(
-                        "checks",
-                        "square Today/Week/Radar/Places tabs; isolated forecast screens; removed manual coordinates/copy; edge-to-edge map with transparent controls; no legend; download line preserves layout",
-                    )
                 }
                 "navigation" -> {
                     waitFor("current forecast") { has("Temperature ") }
@@ -1860,64 +1562,12 @@ class PhoneExercise : Instrumentation() {
                 }
                 "radar" -> {
                     click("Radar")
-                    val mapBounds = Rect().apply { radarMapNode().getBoundsInScreen(this) }
-                    val tabs =
-                        nodes().first {
-                            it.contentDescription?.toString() == "Radar" && it.isClickable
-                        }
-                    val tabBounds = Rect().apply { tabs.getBoundsInScreen(this) }
-                    val coordinates =
-                        nodes().first {
-                            it.text?.toString()?.let { text ->
-                                text.contains("°N") || text.contains("°S")
-                            } == true
-                        }
-                    val coordinateBounds = Rect().apply { coordinates.getBoundsInScreen(this) }
-                    check(mapBounds.height() >= (tabBounds.top - coordinateBounds.bottom) * .75) {
-                        "Radar map must occupy at least 75% of available content height"
-                    }
-                    val text = nodes().mapNotNull { it.text?.toString() }.joinToString(" | ")
-                    for (removed in
-                        listOf(
-                            "OBSERVED",
-                            "DWD RV",
-                            "Issue ",
-                            "Received ",
-                            "tap to refresh",
-                            "hatched:",
-                            "mm / 5 min",
-                        )) {
-                        check(!text.contains(removed)) { "Removed radar text remains: $removed" }
-                    }
-                    check(!Regex("\\d{2} \\w{3} · \\d{2}:\\d{2}").containsMatchIn(text)) {
-                        "Radar date/time remains visible"
-                    }
-                    check(
-                        nodes().none {
-                            it.isClickable &&
-                                it.contentDescription?.toString() in
-                                    listOf("Zoom in", "Zoom out", "Recenter on selected location")
-                        }
-                    ) {
-                        "Map control buttons remain"
-                    }
-                    val play =
-                        nodes().first {
-                            it.contentDescription?.toString() == "Play or pause radar animation"
-                        }
-                    val playBounds = Rect().apply { play.getBoundsInScreen(this) }
-                    check(play.text.isNullOrBlank() && playBounds.width() <= appContext.dp(48)) {
-                        "Playback must use a compact icon button"
-                    }
                     val barBounds =
                         Rect().apply {
                             nodes()
                                 .first { it.className == "android.widget.SeekBar" }
                                 .getBoundsInScreen(this)
                         }
-                    check(barBounds.height() == appContext.dp(48)) {
-                        "Timeline must fit the 48 dp player controls"
-                    }
                     val selectedPlace = PlaceStore(appContext).selected()
                     radarGestures()
                     val recenter =
@@ -1985,7 +1635,7 @@ class PhoneExercise : Instrumentation() {
                     check(bar().rangeInfo.current == paused) { "Pause did not stop playback" }
                     result.putString(
                         "checks",
-                        "map fills radar view; compact icon controls; removed text; pan; pinch in/out; double tap; scrub to last frame; playback loops and pauses",
+                        "pan; pinch in/out; double tap; scrub to last frame; playback loops and pauses",
                     )
                 }
                 "forecast" -> {

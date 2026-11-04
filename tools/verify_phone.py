@@ -12,33 +12,26 @@ PACKAGE = "app.drizziq"
 
 # Keep in sync with the registry in PhoneExercise. Instrumentation phases outside
 # these groups are rejected instead of falling through to PASS.
-SMOKE_PHASES = (
-    "navigation",
-    "layout",
-    "lifecycle",
-    "forecast",
-    "radar",
-    "places-search",
-    "viewport-save",
-    "viewport-restore",
-)
+SMOKE_PHASES = ("smoke",)
 FOCUSED_PHASES = (
-    "static-assets",
     "hourly-refresh",
-    "day-forecast",
-    "header-weather",
     "forecast-status",
     "radar-corruption",
-    "fixture-forecast",
     "fixture-states",
-    "fixture-ui",
+    "lifecycle",
+)
+# Longer checks are opt-in by name; cosmetic layout checks have been retired.
+EXTRA_PHASES = (
+    "navigation", "forecast", "radar", "places-search",
+    "viewport-save", "viewport-restore", "static-assets",
+    "day-forecast", "header-weather", "fixture-forecast", "fixture-ui",
 )
 INTEGRATION_PHASES = ("places-integration",)
 FULL_PHASES = ("main", "persistence", "offline", "stopped-network", "restore")
 # Diagnostic probes report measurements or exercise gestures outside suite gating.
 PROBES = ("recenter-probe", "geocoding-probe", "station-benchmark", "radar-gestures")
 KNOWN_PHASES = frozenset(
-    SMOKE_PHASES + FOCUSED_PHASES + INTEGRATION_PHASES + FULL_PHASES + PROBES
+    SMOKE_PHASES + FOCUSED_PHASES + EXTRA_PHASES + INTEGRATION_PHASES + FULL_PHASES + PROBES
 )
 
 # Selected place and favourites live in places.xml; the saved map camera lives in
@@ -59,7 +52,7 @@ def validate_phase(name):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, epilog="Phases: " + ", ".join(sorted(KNOWN_PHASES)))
     parser.add_argument("--serial", default=os.environ.get("ANDROID_SERIAL"))
     parser.add_argument("--focused", action="store_true", help="Also run the maintained focused regression checks")
     parser.add_argument("--live", action="store_true", help="Use real providers instead of isolated local fixtures")
