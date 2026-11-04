@@ -21,7 +21,8 @@ object Http {
             (Geocoding.allowed(url) ||
                 url.host == "tile.openstreetmap.org" ||
                 (url.host == "opendata.dwd.de" && url.path.startsWith("/weather/")) ||
-                (url.host == "maps.dwd.de" && url.path == "/geoserver/dwd/wms"))
+                (url.host == "maps.dwd.de" && url.path == "/geoserver/dwd/wms") ||
+                (url.host == "view.eumetsat.int" && url.path == "/geoserver/wms"))
 
     private fun checked(url: URL) {
         require(allowed(url)) { "Unapproved data endpoint" }

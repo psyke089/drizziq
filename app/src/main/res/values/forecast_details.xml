@@ -28,5 +28,5 @@
     <string name="hourly_probability_unavailable">Precipitation probability unavailable</string>
     <string name="hourly_gust_description">Maximum wind gust in the preceding hour: %1$.0f km/h</string>
     <string name="hourly_gust_unavailable">Wind gust unavailable</string>
-    <string name="radar_overlay_info">%1$s%2$s%3$s</string>
+    <string name="map_product_button">%1$s ▾</string>
 </resources>

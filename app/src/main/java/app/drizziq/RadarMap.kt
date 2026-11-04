@@ -30,24 +30,124 @@ class RadarMap(context: Context) : View(context) {
     private val failed = BoundedAccessMap<String, Long>(CachePolicy.FAILED_TILE_KEYS)
     private val executor = Executors.newFixedThreadPool(3)
     private val handler = Handler(Looper.getMainLooper())
-    internal var overlayChanged: (() -> Unit)? = null
-    private val overlays =
-        OverlayTiles(context) {
-            invalidate()
-            overlayChanged?.invoke()
+    internal var productChanged: (() -> Unit)? = null
+    private val presentation = MapPresentation()
+    private var productToken = 0
+    private var weatherImage: MapSnapshot? = null
+    private val targets = mutableMapOf<MapProduct, Long?>()
+    private val productZooms = mutableMapOf<MapProduct, Double>()
+    private var pendingZoom = 7.0
+    private var downloadsActive = false
+    private val prepareImage = Runnable { loadProduct() }
+    private val images =
+        MapImages(
+            context,
+            { snapshot ->
+                if (presentation.commit(snapshot.selection.product, productToken)) {
+                    weatherImage = snapshot
+                    zoom = pendingZoom
+                    productZooms[displayedProduct] = zoom
+                    describeViewport()
+                    invalidate()
+                    productChanged?.invoke()
+                }
+            },
+            {
+                invalidate()
+                productChanged?.invoke()
+            },
+        )
+
+    internal val displayedProduct
+        get() = presentation.displayed
+
+    internal val requestedProduct
+        get() = presentation.requested
+
+    internal val productSelection
+        get() = weatherImage?.selection?.takeIf { displayedProduct != MapProduct.RADAR }
+
+    internal val productReceivedAt
+        get() = weatherImage?.receivedAt
+
+    internal val productLoading
+        get() =
+            images.loading ||
+                (requestedProduct != displayedProduct &&
+                    images.notice?.contains("unavailable") != true)
+
+    internal val productNotice
+        get() = images.notice
+
+    internal fun productTimes() = images.times(displayedProduct)
+
+    internal fun product(product: MapProduct, force: Boolean = false) {
+        productZooms[displayedProduct] = zoom
+        productToken = presentation.request(product)
+        images.cancel()
+        handler.removeCallbacks(prepareImage)
+        pendingZoom = (productZooms[product] ?: zoom).coerceAtMost(product.maxZoom)
+        if (product == MapProduct.RADAR) {
+            if (bitmap != null && presentation.commit(product, productToken)) {
+                zoom = pendingZoom
+                describeViewport()
+                invalidate()
+            }
+        } else {
+            visibleArea(pendingZoom)?.let { visible ->
+                images.remembered(product, visible)?.let { snapshot ->
+                    if (presentation.commit(product, productToken)) {
+                        weatherImage = snapshot
+                        zoom = pendingZoom
+                        describeViewport()
+                        invalidate()
+                    }
+                }
+            }
+            loadProduct(force)
         }
-    internal val overlayNotice
-        get() = overlays.notice
+        productChanged?.invoke()
+    }
 
-    internal val overlaySelection
-        get() = overlays.selection
+    internal fun productTime(time: Long) {
+        targets[requestedProduct] = time
+        loadProduct()
+    }
 
-    /** True while the layer menu holds a cloud or temperature layer instead of precipitation. */
-    internal val overlayRequested: Boolean
-        get() = overlays.layer != null
+    internal fun activate(value: Boolean) {
+        downloadsActive = value
+        if (!value) {
+            images.cancel()
+            handler.removeCallbacks(prepareImage)
+        } else if (requestedProduct != MapProduct.RADAR) loadProduct()
+    }
 
-    internal fun overlay(layer: Overlay?, time: Long, online: Boolean) {
-        overlays.set(layer, time, online)
+    internal fun refreshProduct() {
+        if (downloadsActive && requestedProduct != MapProduct.RADAR) loadProduct()
+    }
+
+    private fun visibleArea(atZoom: Double = zoom): MapArea? =
+        if (width > 0 && height > 0) MapArea.viewport(x, y, atZoom, width, height) else null
+
+    private fun loadProduct(force: Boolean = false) {
+        if (
+            !downloadsActive ||
+                disposed ||
+                requestedProduct == MapProduct.RADAR ||
+                width == 0 ||
+                height == 0
+        )
+            return
+        pendingZoom =
+            if (requestedProduct == displayedProduct) zoom
+            else (productZooms[requestedProduct] ?: zoom).coerceAtMost(requestedProduct.maxZoom)
+        images.request(
+            requestedProduct,
+            targets[requestedProduct],
+            MapArea.viewport(x, y, pendingZoom, width, height, 1.15),
+            online,
+            force,
+        )
     }
 
     private val folder = File(context.cacheDir, "tiles").apply { mkdirs() }
@@ -208,11 +308,25 @@ class RadarMap(context: Context) : View(context) {
             (height / 2 + (my - y) * world()).toFloat()
     }
 
-    private fun viewportChanged() {
+    private fun describeViewport() {
+        crosshair.setTint(if (displayedProduct == MapProduct.TEMPERATURE) Hud.bg else Hud.cyan)
+        crosshair.alpha = if (displayedProduct == MapProduct.RADAR) 130 else 255
         val latitude = Math.toDegrees(atan(sinh(Math.PI * (1 - 2 * y))))
         contentDescription =
-            "Precipitation map. Center ${String.format(java.util.Locale.US,"%.6f, %.6f",latitude,x*360-180)}; zoom ${String.format(java.util.Locale.US,"%.2f",zoom)}. Drag to pan, pinch or double tap to zoom."
+            "${if (displayedProduct == MapProduct.RADAR) "Precipitation" else displayedProduct.title} map. Center ${String.format(java.util.Locale.US,"%.6f, %.6f",latitude,x*360-180)}; zoom ${String.format(java.util.Locale.US,"%.2f",zoom)}. Drag to pan, pinch or double tap to zoom."
         invalidate()
+    }
+
+    private fun viewportChanged() {
+        describeViewport()
+        invalidate()
+        handler.removeCallbacks(prepareImage)
+        if (downloadsActive) handler.postDelayed(prepareImage, 250)
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (w > 0 && h > 0) viewportChanged()
     }
 
     fun recenter() {
@@ -236,7 +350,7 @@ class RadarMap(context: Context) : View(context) {
 
     fun zoomBy(amount: Double, focusX: Float = width / 2f, focusY: Float = height / 2f) {
         val before = world()
-        val next = (zoom + amount).coerceIn(2.0, 17.0)
+        val next = (zoom + amount).coerceIn(2.0, displayedProduct.maxZoom)
         zoom = next
         val after = world()
         x = (x + (focusX - width / 2) * (1 / before - 1 / after) + 1) % 1
@@ -261,7 +375,16 @@ class RadarMap(context: Context) : View(context) {
         }
         this.frame = frame
         bitmap = image
+        val switching = displayedProduct != MapProduct.RADAR
+        if (
+            requestedProduct == MapProduct.RADAR &&
+                presentation.commit(MapProduct.RADAR, productToken)
+        ) {
+            if (switching) zoom = pendingZoom
+            describeViewport()
+        }
         invalidate()
+        productChanged?.invoke()
     }
 
     fun reset() {
@@ -386,11 +509,34 @@ class RadarMap(context: Context) : View(context) {
             if (image == null) request(key, z, nx, iy)
         }
         p.colorFilter = null
-        overlays.draw(c, x, y, zoom, width, height)
+        if (displayedProduct != MapProduct.RADAR)
+            weatherImage?.let { snapshot ->
+                val area = snapshot.area
+                val world = world()
+                val middle = (area.left + area.right) / 2
+                val delta = ((middle - x + .5 + 1) % 1) - .5
+                val left = width / 2 + (delta - (area.right - area.left) / 2) * world
+                val top = height / 2 + (area.top - y) * world
+                p.alpha = if (displayedProduct == MapProduct.SATELLITE) 255 else 220
+                c.drawBitmap(
+                    snapshot.bitmap,
+                    null,
+                    tileRect.apply {
+                        set(
+                            left.toFloat(),
+                            top.toFloat(),
+                            (left + (area.right - area.left) * world).toFloat(),
+                            (top + (area.bottom - area.top) * world).toFloat(),
+                        )
+                    },
+                    p,
+                )
+                p.alpha = 255
+            }
         val f = frame
         val image = bitmap
-        // The layer menu picks exactly one product; clouds and temperature replace precipitation.
-        if (f != null && image != null && !overlayRequested) {
+        // Only the fully committed product is drawn.
+        if (f != null && image != null && displayedProduct == MapProduct.RADAR) {
             val world = world()
             for (index in geographicMesh.indices step 2) {
                 val delta = ((geographicMesh[index] - x + .5 + 1) % 1) - .5
@@ -411,7 +557,7 @@ class RadarMap(context: Context) : View(context) {
         p.alpha = 255
         p.textSize = context.dp(11).toFloat()
         p.typeface = Typeface.MONOSPACE
-        if (f != null && !f.grid.contains(place)) {
+        if (displayedProduct == MapProduct.RADAR && f != null && !f.grid.contains(place)) {
             p.color = Hud.bg
             c.drawRect(0f, 0f, width.toFloat(), context.dp(34).toFloat(), p)
             p.color = Hud.amber
@@ -423,7 +569,7 @@ class RadarMap(context: Context) : View(context) {
 
     fun dispose() {
         disposed = true
-        overlays.close()
+        images.close()
         executor.shutdownNow()
         handler.removeCallbacksAndMessages(null)
         tiles.evictAll()
@@ -432,9 +578,16 @@ class RadarMap(context: Context) : View(context) {
 }
 
 class RadarTimeline(context: Context) : View(context) {
+    var times: List<Long> = emptyList()
+        set(value) {
+            field = value
+            invalidate()
+        }
+
     var frames: List<RadarFrame> = emptyList()
         set(value) {
             field = value
+            times = value.map { it.time }
             invalidate()
         }
 
@@ -454,43 +607,43 @@ class RadarTimeline(context: Context) : View(context) {
     }
 
     private fun pos(t: Long): Float {
-        if (frames.size < 2) return width / 2f
+        if (times.size < 2) return width / 2f
         return context.dp(16) +
-            (width - context.dp(32)) * (t - frames.first().time).toFloat() /
-                (frames.last().time - frames.first().time)
+            (width - context.dp(32)) * (t - times.first()).toFloat() /
+                (times.last() - times.first())
     }
 
     override fun onDraw(c: Canvas) {
-        if (frames.isEmpty()) return
+        if (times.isEmpty()) return
         val y = height * .5f
         p.color = Hud.line
         p.strokeWidth = context.dp(2).toFloat()
-        c.drawLine(pos(frames.first().time), y, pos(frames.last().time), y, p)
-        frames.forEachIndexed { i, f ->
+        c.drawLine(pos(times.first()), y, pos(times.last()), y, p)
+        times.forEachIndexed { i, time ->
             p.color = if (i <= selected) Hud.cyan else Hud.muted
-            c.drawCircle(pos(f.time), y, context.dp(1).toFloat(), p)
+            c.drawCircle(pos(time), y, context.dp(1).toFloat(), p)
         }
         val now = AppPlatform.now()
-        if (now in frames.first().time..frames.last().time) {
+        if (now in times.first()..times.last()) {
             p.color = Hud.amber
             p.strokeWidth = context.dp(1).toFloat()
             val x = pos(now)
             c.drawLine(x, y - context.dp(7), x, y + context.dp(7), p)
         }
         p.color = Hud.cyan
-        frames.getOrNull(selected)?.let {
-            c.drawCircle(pos(it.time), y, context.dp(5).toFloat(), p)
+        times.getOrNull(selected)?.let {
+            c.drawCircle(pos(it), y, context.dp(5).toFloat(), p)
         }
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
-        if (frames.isEmpty()) return false
+        if (!isEnabled || times.isEmpty()) return false
         if (
             e.action == MotionEvent.ACTION_DOWN ||
                 e.action == MotionEvent.ACTION_MOVE ||
                 e.action == MotionEvent.ACTION_UP
         ) {
-            val index = frames.indices.minBy { abs(pos(frames[it].time) - e.x) }
+            val index = times.indices.minBy { abs(pos(times[it]) - e.x) }
             onSelect?.invoke(index)
             if (e.action == MotionEvent.ACTION_UP) performClick()
             return true
@@ -516,12 +669,12 @@ class RadarTimeline(context: Context) : View(context) {
             android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
                 .ACTION_SCROLL_BACKWARD
         )
-        if (frames.isNotEmpty())
+        if (times.isNotEmpty())
             info.rangeInfo =
                 android.view.accessibility.AccessibilityNodeInfo.RangeInfo.obtain(
                     android.view.accessibility.AccessibilityNodeInfo.RangeInfo.RANGE_TYPE_INT,
                     0f,
-                    (frames.size - 1).toFloat(),
+                    (times.size - 1).toFloat(),
                     selected.toFloat(),
                 )
     }
@@ -533,8 +686,72 @@ class RadarTimeline(context: Context) : View(context) {
                 8192 -> selected - 1
                 else -> return super.performAccessibilityAction(action, args)
             }
-        if (frames.isEmpty()) return false
-        onSelect?.invoke(next.coerceIn(0, frames.lastIndex))
+        if (!isEnabled || times.isEmpty()) return false
+        onSelect?.invoke(next.coerceIn(0, times.lastIndex))
         return true
+    }
+}
+
+/** The discrete classes of DWD's icon_reg025_fd_sl_t2m_wmc_isoarea style. */
+internal class TemperatureScale(context: Context) : View(context) {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val colours =
+        intArrayOf(
+            0xFFFFF7F3.toInt(),
+            0xFFFDE0DD.toInt(),
+            0xFFFCC5C0.toInt(),
+            0xFFFA9FB5.toInt(),
+            0xFFF768A1.toInt(),
+            0xFFDD3497.toInt(),
+            0xFFAE017E.toInt(),
+            0xFF7A0177.toInt(),
+            0xFF680099.toInt(),
+            0xFF0570B0.toInt(),
+            0xFF74A9CF.toInt(),
+            0xFFBDC9E1.toInt(),
+            0xFFEDF8FB.toInt(),
+            0xFFC7E9B4.toInt(),
+            0xFFFFFFB2.toInt(),
+            0xFFFED976.toInt(),
+            0xFFFEB24C.toInt(),
+            0xFFFD8D3C.toInt(),
+            0xFFFC4E2A.toInt(),
+            0xFFE31A1C.toInt(),
+            0xFFB10026.toInt(),
+            0xFF4D0000.toInt(),
+        )
+    private val positions = intArrayOf(0, 5, 9, 13, 17, 21)
+    private val labels = arrayOf("<−60", "−40", "−20", "0", "20", ">40 °C")
+
+    init {
+        contentDescription =
+            "DWD temperature scale in Celsius, below minus sixty through above forty degrees; five-degree colour classes"
+        paint.textSize = context.dp(9).toFloat()
+        paint.typeface = Typeface.MONOSPACE
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val step = width.toFloat() / colours.size
+        for (i in colours.indices) {
+            paint.color = colours[i]
+            canvas.drawRect(i * step, 0f, (i + 1) * step, context.dp(7).toFloat(), paint)
+        }
+        paint.color = Hud.ink
+        for (i in positions.indices) {
+            paint.textAlign =
+                when (i) {
+                    0 -> Paint.Align.LEFT
+                    positions.lastIndex -> Paint.Align.RIGHT
+                    else -> Paint.Align.CENTER
+                }
+            val x =
+                when (i) {
+                    0 -> 0f
+                    positions.lastIndex -> width.toFloat()
+                    else -> (positions[i] + .5f) * step
+                }
+            canvas.drawText(labels[i], x, context.dp(24).toFloat(), paint)
+        }
     }
 }

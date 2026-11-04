@@ -17,6 +17,8 @@ internal object PhoneFixtures {
     private val preferences = Collections.synchronizedSet(mutableSetOf<String>())
     val unexpected = Collections.synchronizedList(mutableListOf<String>())
     val requests = AtomicInteger()
+    @Volatile var mapFailure = false
+    @Volatile var mapGate: java.util.concurrent.CountDownLatch? = null
     @Volatile var forecastFailure = false
     @Volatile var forecastGate: java.util.concurrent.CountDownLatch? = null
 
@@ -45,6 +47,8 @@ internal object PhoneFixtures {
         unexpected.clear()
         requests.set(0)
         forecastFailure = false
+        mapFailure = false
+        mapGate = null
         forecastGate = null
         AppPlatform.clock = { now }
         AppPlatform.contexts = ::context
@@ -78,15 +82,40 @@ internal object PhoneFixtures {
                 url.host == "maps.dwd.de" && url.query.contains("GetCapabilities", true) -> {
                     bytes =
                         """<WMS_Capabilities xmlns="http://www.opengis.net/wms"><Capability><Layer>
-                    <Layer><Name>Icon_reg025_fd_sl_T2M</Name><Dimension name="time">2026-10-22T00:00:00Z/2026-10-23T12:00:00Z/PT1H</Dimension></Layer>
+                    <Layer><Name>Icon_reg025_fd_sl_T2M</Name><Dimension name="REFERENCE_TIME">2026-10-22T12:00:00Z,2026-10-22T18:00:00Z</Dimension><Dimension name="time">2026-10-22T00:00:00Z/2026-10-23T12:00:00Z/PT1H</Dimension></Layer>
                     <Layer><Name>Satellite_worldmosaic_3km_world_ir108_3h</Name><Dimension name="time">2026-10-22T00:00:00Z/2026-10-22T18:00:00Z/PT3H</Dimension></Layer>
                     </Layer></Capability></WMS_Capabilities>"""
                             .toByteArray()
                     status = 200
                 }
-                url.host == "maps.dwd.de" && url.query.contains("GetMap", true) -> {
-                    bytes = png
+                url.host == "view.eumetsat.int" && url.query.contains("GetCapabilities", true) -> {
+                    bytes =
+                        """<WMS_Capabilities xmlns="http://www.opengis.net/wms"><Capability><Layer><Layer><Name>mtg_fd:rgb_geocolour</Name><Dimension name="time">2024-09-23T00:00:00Z/2026-10-22T20:00:00Z/PT10M</Dimension></Layer></Layer></Capability></WMS_Capabilities>"""
+                            .toByteArray()
                     status = 200
+                }
+                (url.host == "maps.dwd.de" || url.host == "view.eumetsat.int") &&
+                    url.query.contains("GetMap", true) -> {
+                    mapGate?.await(15, java.util.concurrent.TimeUnit.SECONDS)
+                    val params =
+                        url.query.split('&').associate {
+                            it.substringBefore('=').uppercase() to
+                                java.net.URLDecoder.decode(it.substringAfter('='), "UTF-8")
+                        }
+                    val image =
+                        android.graphics.Bitmap.createBitmap(
+                            params.getValue("WIDTH").toInt(),
+                            params.getValue("HEIGHT").toInt(),
+                            android.graphics.Bitmap.Config.ARGB_8888,
+                        )
+                    image.eraseColor(
+                        if (url.host == "maps.dwd.de") 0xFFFFFFB3.toInt() else 0xFF30495F.toInt()
+                    )
+                    val encoded = java.io.ByteArrayOutputStream()
+                    image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, encoded)
+                    image.recycle()
+                    bytes = encoded.toByteArray()
+                    status = if (mapFailure) 503 else 200
                 }
                 url.host == "opendata.dwd.de" && url.path.endsWith(".kmz") -> {
                     forecastGate?.await(15, java.util.concurrent.TimeUnit.SECONDS)
