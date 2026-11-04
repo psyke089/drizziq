@@ -147,4 +147,27 @@ class OverlayTest {
         )
         assertNull(OverlayModel.serviceError(byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47)))
     }
+
+    @Test
+    fun resolvedBucket_usesResolutionAgeRatherThanWeatherAge() {
+        val policy = OverlayRefreshPolicy()
+        val now = at("2026-11-03T10:45:00Z")
+        val bucket = at("2026-11-03T09:00:00Z")
+        policy.resolve(Overlay.CLOUDS, bucket, now)
+        assertEquals(bucket, policy.resolved(Overlay.CLOUDS, now + 29 * 60_000L))
+        assertNull(policy.resolved(Overlay.CLOUDS, now + 30 * 60_000L))
+    }
+
+    @Test
+    fun failedCapabilities_retryAfterOneMinuteAndSuccessRestoresHourlyCadence() {
+        val policy = OverlayRefreshPolicy()
+        val now = at("2026-11-03T10:45:00Z")
+        assertTrue(policy.capabilitiesDue(now))
+        policy.capabilitiesFailed(now)
+        assertFalse(policy.capabilitiesDue(now + 59_999L))
+        assertTrue(policy.capabilitiesDue(now + 60_000L))
+        policy.capabilitiesSucceeded(now + 60_000L)
+        assertFalse(policy.capabilitiesDue(now + 120_000L))
+        assertTrue(policy.capabilitiesDue(now + 60_000L + 3600_000L))
+    }
 }

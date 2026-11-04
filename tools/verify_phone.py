@@ -64,6 +64,8 @@ def main():
     args = parser.parse_args()
     for name in args.phase or ():
         validate_phase(name)
+        if name in FULL_PHASES:
+            parser.error(f"{name} is full-integration-only; use --full so radio settings are restored")
     adb = [args.adb] + (["-s", args.serial] if args.serial else [])
     args.reports.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()

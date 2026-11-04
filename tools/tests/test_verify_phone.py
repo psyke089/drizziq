@@ -76,7 +76,7 @@ class PhoneRunnerTest(unittest.TestCase):
         ):
             try:
                 runner.main()
-            except Exception as error:
+            except (Exception, SystemExit) as error:
                 return calls, error
             finally:
                 report = Path(temporary) / "tmp/verification/timings.json"
@@ -143,6 +143,14 @@ class PhoneRunnerTest(unittest.TestCase):
             ["smoke", *runner.FOCUSED_PHASES],
             self.phases(calls),
         )
+
+    def test_full_only_phases_cannot_bypass_radio_restoration_through_phase_option(self):
+        for phase in runner.FULL_PHASES:
+            for flags in ((), ("--live",), ("--full",)):
+                with self.subTest(phase=phase, flags=flags), patch("sys.stderr"):
+                    calls, error = self.run_runner("--phase", phase, *flags)
+                    self.assertIsInstance(error, SystemExit)
+                    self.assertEqual([], calls)
 
     def test_unknown_phase_is_rejected_before_contacting_the_device(self):
         with self.assertRaises(ValueError):

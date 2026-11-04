@@ -222,3 +222,38 @@ internal object OverlayModel {
             ?.take(300)
     }
 }
+
+/** Request timing stays separate from the weather timestamps selected for display. */
+internal class OverlayRefreshPolicy {
+    private data class Resolution(val time: Long, val checkedAt: Long)
+
+    private val resolutions = mutableMapOf<Overlay, Resolution>()
+    private var capabilitiesChecked: Long? = null
+    private var capabilitiesRetryAfter = 0L
+
+    fun resolved(overlay: Overlay, now: Long): Long? {
+        val value = resolutions[overlay] ?: return null
+        if (now - value.checkedAt >= 30 * 60_000L) {
+            resolutions.remove(overlay)
+            return null
+        }
+        return value.time
+    }
+
+    fun resolve(overlay: Overlay, time: Long, now: Long) {
+        resolutions[overlay] = Resolution(time, now)
+    }
+
+    fun capabilitiesDue(now: Long): Boolean =
+        now >= capabilitiesRetryAfter &&
+            (capabilitiesChecked?.let { now - it >= 3600_000L } ?: true)
+
+    fun capabilitiesSucceeded(now: Long) {
+        capabilitiesChecked = now
+        capabilitiesRetryAfter = 0L
+    }
+
+    fun capabilitiesFailed(now: Long) {
+        capabilitiesRetryAfter = now + 60_000L
+    }
+}

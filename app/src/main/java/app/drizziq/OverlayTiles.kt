@@ -38,16 +38,14 @@ internal class OverlayTiles(private val context: Context, private val changed: (
     private var generation = 0
     private var disposed = false
     private var loadingCapabilities = false
-    private var capabilitiesChecked = 0L
+    private val refreshPolicy = OverlayRefreshPolicy()
     private var capabilities: Map<Overlay, OverlayAvailability>? = null
     private var selected: Overlay? = null
     private var target = 0L
     private var online = true
-    private val resolved = mutableMapOf<Overlay, Long>()
     private val resolveBackoff = mutableMapOf<Overlay, Long>()
     private val unavailable = mutableMapOf<Overlay, String>()
     private var resolving = false
-    private var rendered = 0
     var notice: String? = null
         private set
 
@@ -72,7 +70,7 @@ internal class OverlayTiles(private val context: Context, private val changed: (
                         handler.post {
                             if (!disposed && capabilities == null) {
                                 capabilities = parsed
-                                capabilitiesChecked = capFile.lastModified()
+                                refreshPolicy.capabilitiesSucceeded(capFile.lastModified())
                                 update()
                             }
                         }
@@ -85,7 +83,8 @@ internal class OverlayTiles(private val context: Context, private val changed: (
         selected = overlay
         target = frameTime
         online = connected
-        if (!changedInput) return
+        // Periodic renders also age resolved buckets and retry failed capabilities.
+        if (!changedInput && overlay == null) return
         update()
     }
 
@@ -99,16 +98,18 @@ internal class OverlayTiles(private val context: Context, private val changed: (
             return
         }
         val previous = selection
-        resolved[overlay]?.let {
-            if (AppPlatform.now() - it > 30 * 60_000L) resolved.remove(overlay)
-        }
         selection = capabilities?.let {
-            OverlayModel.select(overlay, target, AppPlatform.now(), it, resolved[overlay])
+            OverlayModel.select(
+                overlay,
+                target,
+                AppPlatform.now(),
+                it,
+                refreshPolicy.resolved(overlay, AppPlatform.now()),
+            )
         }
         if (previous != selection) {
             generation++
             waiting.clear()
-            rendered = 0
         }
         notice =
             when {
@@ -121,13 +122,8 @@ internal class OverlayTiles(private val context: Context, private val changed: (
             }
         changed()
         if (online && capabilities != null && selection == null) resolve(overlay)
-        if (
-            online &&
-                !loadingCapabilities &&
-                (capabilitiesChecked == 0L || AppPlatform.now() - capabilitiesChecked > 3600000L)
-        ) {
+        if (online && !loadingCapabilities && refreshPolicy.capabilitiesDue(AppPlatform.now())) {
             loadingCapabilities = true
-            capabilitiesChecked = AppPlatform.now()
             workers.execute {
                 val result = runCatching {
                     val bytes =
@@ -144,9 +140,11 @@ internal class OverlayTiles(private val context: Context, private val changed: (
                     if (!disposed) {
                         loadingCapabilities = false
                         if (result.isSuccess) {
+                            refreshPolicy.capabilitiesSucceeded(AppPlatform.now())
                             capabilities = result.getOrThrow()
                             update()
                         } else {
+                            refreshPolicy.capabilitiesFailed(AppPlatform.now())
                             notice =
                                 "Overlay unavailable · ${result.exceptionOrNull()?.message ?: "DWD"}"
                             changed()
@@ -185,7 +183,7 @@ internal class OverlayTiles(private val context: Context, private val changed: (
                 if (disposed) return@post
                 resolving = false
                 if (result != null) {
-                    resolved[overlay] = result.time
+                    refreshPolicy.resolve(overlay, result.time, AppPlatform.now())
                     resolveBackoff.remove(overlay)
                     unavailable.remove(overlay)
                     notice = null

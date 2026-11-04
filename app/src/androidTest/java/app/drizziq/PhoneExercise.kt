@@ -1490,7 +1490,7 @@ class PhoneExercise : Instrumentation() {
                             check(
                                 has("Location access") && (has("City search") || has("city search"))
                             )
-                            click("Close")
+                            click("Close dialog")
                         }
                     }
                     check(
