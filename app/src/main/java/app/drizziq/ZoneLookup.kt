@@ -2,7 +2,7 @@ package app.drizziq
 
 import android.content.Context
 
-/** CC0 tz-lookup quadtree; see docs/DATA.md. Approximate at borders; user can override. */
+/** CC0 tz-lookup quadtree; see AGENTS.md. Approximate at borders; user can override. */
 class ZoneLookup(context: Context) {
     private val tree = context.assets.open("timezones.tree").bufferedReader().use { it.readText() }
     private val zones = context.assets.open("timezones.txt").bufferedReader().use { it.readLines() }

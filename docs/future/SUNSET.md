@@ -44,7 +44,7 @@ distribution service or recurring weather pipeline.
 | Design | One dark, sci-fi/futuristic colour scheme. Generate vectors/Canvas artwork locally; do not download icons. |
 | Sources | Free/public sources only. Any account or API key, including a free registration, needs explicit approval first. No credentials are embedded in the app. |
 
-Follow [AGENTS.md](../../AGENTS.md) and [DATA.md](../DATA.md). Preserve the current selection, favourites, search
+Follow [AGENTS.md](../../AGENTS.md), including its data-source guidance. Preserve the current selection, favourites, search
 attribution, radar camera, connectivity and permission settings during ordinary
 checks. Existing app accounts are not approval for a new data account.
 
@@ -380,7 +380,7 @@ C additionally needs a hosting/operations decision and a validated spatial
 cloud interpretation. Leave those explicit rather than guessing credentials,
 infrastructure or scientific thresholds during UI implementation.
 
-Update `docs/DATA.md`, bundled notices, README and tests when the corresponding
+Update `AGENTS.md`, bundled notices, README and tests when the corresponding
 increment is implemented. Do not mark this
 feature shipped, bump the app again or attach it to the 1.2.0 release merely
 because this draft exists.
