@@ -44,7 +44,7 @@ class MainActivity : Activity() {
     private enum class Page {
         TODAY,
         WEEK,
-        MAP,
+        RADAR,
         PLACES,
     }
 
@@ -58,13 +58,6 @@ class MainActivity : Activity() {
     private var frameError = false
     private lateinit var timeline: RadarTimeline
     private lateinit var playButton: ImageButton
-    private lateinit var radarTime: TextView
-    private lateinit var productInfo: TextView
-    private var initialProduct = MapProduct.RADAR
-    private lateinit var productButton: TextView
-    private lateinit var mapAttribution: TextView
-    private lateinit var temperatureLegend: LinearLayout
-    private var layerMenu: PopupWindow? = null
     private val handler = Handler(Looper.getMainLooper())
     private val decoder = Executors.newSingleThreadExecutor()
     private val frames = object : android.util.LruCache<String, Bitmap>(3) {}
@@ -146,17 +139,8 @@ class MainActivity : Activity() {
             }
         }
     private val advance = Runnable {
-        if (playing && active && radarVisible) {
-            if (map.displayedProduct == MapProduct.RADAR)
-                sequence?.let { requestFrame(nextRadarFrame(frameIndex, it.frames.size)) }
-            else {
-                val times = map.productTimes()
-                if (times.isNotEmpty()) {
-                    val index = times.indexOf(map.productSelection?.time).coerceAtLeast(0)
-                    map.productTime(times[(index + 1) % times.size])
-                }
-            }
-        }
+        if (playing && active && radarVisible)
+            sequence?.let { requestFrame(nextRadarFrame(frameIndex, it.frames.size)) }
     }
 
     override fun attachBaseContext(base: android.content.Context) {
@@ -181,12 +165,7 @@ class MainActivity : Activity() {
                 },
                 { place -> zoneEntry(place) },
             )
-        initialProduct =
-            savedInstanceState?.getString("map-product")?.let { name ->
-                MapProduct.entries.firstOrNull { it.name == name }
-            } ?: MapProduct.RADAR
         createLayout()
-        map.product(initialProduct)
         ready = true
         progressSubscription =
             Http.downloads.observe { busy ->
@@ -203,7 +182,7 @@ class MainActivity : Activity() {
                 Page.entries.firstOrNull { it.name == name }
                     ?: when (name) {
                         "FORECAST" -> Page.TODAY
-                        "RADAR" -> Page.MAP
+                        "MAP" -> Page.RADAR
                         else -> null
                     }
             } ?: Page.TODAY
@@ -332,7 +311,7 @@ class MainActivity : Activity() {
                     addView(
                         NavigationGlyph(
                             this@MainActivity,
-                            if (destination == Page.MAP) "RADAR" else destination.name,
+                            destination.name,
                         ),
                         LinearLayout.LayoutParams(dp(24), dp(24)),
                     )
@@ -619,10 +598,8 @@ class MainActivity : Activity() {
                 gravity = Gravity.CENTER
                 visibility = View.GONE
                 setOnClickListener {
-                    if (map.requestedProduct == MapProduct.RADAR) {
-                        repo.refreshRadar()
-                        if (sequence != null) requestFrame(frameIndex)
-                    } else map.product(map.requestedProduct, true)
+                    repo.refreshRadar()
+                    if (sequence != null) requestFrame(frameIndex)
                 }
             }
         radarPanel.addView(
@@ -631,8 +608,8 @@ class MainActivity : Activity() {
                 topMargin = dp(8)
             },
         )
-        mapAttribution =
-            label("© OpenStreetMap contributors · DWD", 9f, Hud.muted).apply {
+        val attribution =
+            label("© OpenStreetMap contributors", 9f, Hud.muted).apply {
                 setPadding(dp(6), dp(4), dp(6), dp(4))
                 setBackgroundColor(0xCF080F19.toInt())
                 contentDescription = "OpenStreetMap attribution and licence"
@@ -640,244 +617,51 @@ class MainActivity : Activity() {
                     startActivity(
                         Intent(
                             Intent.ACTION_VIEW,
-                            Uri.parse(
-                                if (map.displayedProduct == MapProduct.SATELLITE)
-                                    "https://user.eumetsat.int/catalogue/EO%3AEUM%3ADAT%3A0913"
-                                else "https://www.openstreetmap.org/copyright"
-                            ),
+                            Uri.parse("https://www.openstreetmap.org/copyright"),
                         )
                     )
                 }
             }
         radarPanel.addView(
-            mapAttribution,
+            attribution,
             FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START),
         )
         val controls =
             row().apply {
                 tag = "radar-controls"
-                setBackgroundColor(0xEE080F19.toInt())
                 setPadding(dp(12), 0, dp(12), 0)
             }
         playButton =
             ImageButton(this).apply {
                 setImageResource(R.drawable.ic_play)
                 contentDescription = "Play or pause radar animation"
-                setPadding(dp(4), dp(4), dp(4), dp(4))
+                setPadding(dp(12), dp(8), dp(12), dp(8))
                 background = null
                 setOnClickListener { setPlaying(!playing) }
             }
-        controls.addView(playButton, LinearLayout.LayoutParams(dp(48), dp(48)))
+        controls.addView(playButton, LinearLayout.LayoutParams(dp(48), dp(40)))
         timeline =
             RadarTimeline(this).apply {
                 onSelect = {
                     setPlaying(false)
-                    if (map.displayedProduct == MapProduct.RADAR) requestFrame(it)
-                    else map.productTimes().getOrNull(it)?.let(map::productTime)
+                    requestFrame(it)
                 }
             }
         controls.addView(
             timeline,
-            LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(8) },
-        )
-        radarTime =
-            label("—", 12f, Hud.ink, true).apply {
-                tag = "radar-time"
-                gravity = Gravity.CENTER
-                contentDescription = "Radar frame unavailable"
-            }
-        controls.addView(
-            radarTime,
-            LinearLayout.LayoutParams(dp(96), dp(48)).apply { leftMargin = dp(8) },
+            LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(8) },
         )
         radarPanel.addView(
             controls,
-            FrameLayout.LayoutParams(-1, dp(48), Gravity.BOTTOM),
+            FrameLayout.LayoutParams(-1, dp(40), Gravity.BOTTOM),
         )
-        productInfo =
-            label("", 10f, Hud.ink, true).apply {
-                setPadding(dp(8), dp(5), dp(8), dp(5))
-                background = panel()
-                visibility = View.GONE
-            }
-        radarPanel.addView(
-            productInfo,
-            FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START).apply {
-                bottomMargin = dp(60)
-                leftMargin = dp(8)
-                rightMargin = dp(8)
-            },
-        )
-        temperatureLegend =
-            row().apply {
-                background = panel()
-                setPadding(dp(8), dp(4), dp(8), dp(4))
-                visibility = View.GONE
-                contentDescription =
-                    "Temperature scale in Celsius: colours represent five degree intervals"
-            }
-        temperatureLegend.addView(
-            TemperatureScale(this),
-            LinearLayout.LayoutParams(dp(284), dp(34)),
-        )
-        radarPanel.addView(
-            temperatureLegend,
-            FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START).apply {
-                bottomMargin = dp(60)
-                leftMargin = dp(8)
-            },
-        )
-        productButton =
-            label("RADAR ▾", 12f, Hud.ink, true).apply {
-                tag = "map-products"
-                gravity = Gravity.CENTER
-                minimumHeight = dp(48)
-                minWidth = dp(140)
-                setSingleLine(true)
-                setPadding(dp(14), 0, dp(14), 0)
-                isClickable = true
-                isFocusable = true
-                background = panel(Hud.panel, Hud.line, dp(8).toFloat())
-                setOnClickListener { showProducts(this) }
-            }
-        radarPanel.addView(
-            productButton,
-            FrameLayout.LayoutParams(-2, dp(48), Gravity.TOP or Gravity.END).apply {
-                topMargin = dp(30)
-                rightMargin = dp(8)
-            },
-        )
-        map.productChanged = {
-            updateMapUi()
-            if (
-                playing &&
-                    active &&
-                    radarVisible &&
-                    !map.productLoading &&
-                    map.productNotice?.contains("unavailable") != true
-            ) {
-                handler.removeCallbacks(advance)
-                handler.postDelayed(advance, 900)
-            }
-        }
         content.addView(radarPanel, FrameLayout.LayoutParams(-1, -1))
-    }
-
-    private fun showProducts(anchor: View) {
-        layerMenu?.dismiss()
-        val menu = column()
-        lateinit var popup: PopupWindow
-        for (product in MapProduct.entries) {
-            val selected = map.displayedProduct == product
-            val choice =
-                row().apply {
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(14), 0, dp(14), 0)
-                    minimumHeight = dp(52)
-                    background =
-                        panel(Hud.panel, if (selected) Hud.cyan else Hud.line, dp(8).toFloat())
-                    isClickable = true
-                    isFocusable = true
-                    contentDescription = "${product.title}${if (selected) ", selected" else ""}"
-                    addView(
-                        SvgIcon(this@MainActivity, product.icon),
-                        LinearLayout.LayoutParams(dp(20), dp(20)).apply { rightMargin = dp(12) },
-                    )
-                    addView(label(product.title, 13f, if (selected) Hud.cyan else Hud.ink))
-                    setOnClickListener {
-                        setPlaying(false)
-                        popup.dismiss()
-                        map.product(product)
-                    }
-                }
-            if (menu.childCount > 0) menu.space(6)
-            menu.addView(choice, LinearLayout.LayoutParams(-1, dp(52)))
-        }
-        popup =
-            PopupWindow(menu, dp(200), -2, true).apply {
-                isOutsideTouchable = true
-                setBackgroundDrawable(
-                    android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
-                )
-                elevation = dp(8).toFloat()
-            }
-        layerMenu = popup
-        popup.setOnDismissListener { if (layerMenu === popup) layerMenu = null }
-        popup.showAsDropDown(anchor, anchor.width - dp(200), dp(4))
-    }
-
-    private fun updateMapUi() {
-        if (!::productButton.isInitialized) return
-        val product = map.displayedProduct
-        val selection = map.productSelection
-        val isRadar = product == MapProduct.RADAR
-        productButton.text =
-            hudString(R.string.map_product_button, product.title.uppercase(Locale.US))
-        productButton.contentDescription = "Map products, ${product.title}"
-        mapAttribution.text =
-            if (product == MapProduct.SATELLITE) "© EUMETSAT / NASA · © OpenStreetMap contributors"
-            else "© OpenStreetMap contributors · DWD"
-        mapAttribution.contentDescription =
-            if (product == MapProduct.SATELLITE)
-                "EUMETSAT and NASA satellite attribution and licence"
-            else "OpenStreetMap attribution and licence"
-        temperatureLegend.visibility =
-            if (product == MapProduct.TEMPERATURE) View.VISIBLE else View.GONE
-        (productInfo.layoutParams as FrameLayout.LayoutParams).bottomMargin =
-            dp(if (product == MapProduct.TEMPERATURE) 112 else 60)
-        productInfo.visibility = if (isRadar) View.GONE else View.VISIBLE
-        if (selection != null) {
-            val age = ((AppPlatform.now() - selection.time) / 60_000).coerceAtLeast(0)
-            productInfo.text =
-                if (product == MapProduct.SATELLITE)
-                    "GEOCOLOUR · OBSERVED · ${age}m ago${if (age > 90) " · STALE" else ""}"
-                else
-                    "2 m TEMP · FORECAST · 5°C classes\nModel ${Times.format(selection.run ?: selection.time,"dd MMM HH:mm",repo.place.zone)}${if (AppPlatform.now()-(selection.run ?: 0) > 9*3600_000L) " · STALE" else ""}"
-        }
-        if (isRadar) {
-            val frame = map.frame
-            timeline.frames = sequence?.frames.orEmpty()
-            timeline.selected =
-                sequence?.frames?.indexOfFirst { it.time == frame?.time }?.coerceAtLeast(0) ?: 0
-            radarTime.text = frame?.let { Times.format(it.time, "HH:mm", repo.place.zone) } ?: "—"
-            radarTime.contentDescription =
-                frame?.let {
-                    "Radar ${Times.format(it.time,"EEEE dd MMM yyyy HH:mm z",repo.place.zone)}, ${if (it.lead > 0) "forecast +${it.lead} minutes" else "observation"}"
-                } ?: "Radar frame unavailable"
-            timeline.contentDescription =
-                if (frame == null) "Radar timeline, waiting for frames"
-                else
-                    "Radar frame ${Times.format(frame.time,"dd MMM HH:mm z",repo.place.zone)}, ${if (frame.lead > 0) "FORECAST +${frame.lead}m" else "OBSERVED"}, ${repo.radar.state.name}, ${sequence?.frames?.size ?: 0} frames${if (timeline.selected > 0 && frame.time-(sequence?.frames?.getOrNull(timeline.selected-1)?.time ?: frame.time) > 300000L) ", gap before frame" else ""}${if (frameError) "; selected frame unavailable, showing retained frame" else ""}"
-        } else {
-            timeline.times = map.productTimes()
-            timeline.selected = timeline.times.indexOf(selection?.time).coerceAtLeast(0)
-            radarTime.text =
-                selection?.let { Times.format(it.time, "dd MMM HH:mm", repo.place.zone) } ?: "—"
-            radarTime.contentDescription = selection?.let {
-                "${product.title} ${Times.format(it.time,"EEEE dd MMM yyyy HH:mm z",repo.place.zone)}, ${if (product == MapProduct.SATELLITE) "observation" else "forecast"}"
-            }
-            timeline.contentDescription =
-                "${product.title} timeline, ${radarTime.contentDescription}"
-        }
-        playButton.contentDescription = "Play or pause ${product.title.lowercase()} animation"
-        playButton.isEnabled =
-            !map.productLoading && if (isRadar) sequence != null else timeline.times.size > 1
-        timeline.isEnabled = map.requestedProduct == map.displayedProduct
-        updateRadarNotice()
     }
 
     private fun updateRadarNotice() {
         val reading = repo.radar
         val message =
             when {
-                map.productNotice != null ->
-                    map.productNotice +
-                        if (map.requestedProduct != map.displayedProduct)
-                            " · showing ${map.displayedProduct.title}"
-                        else ""
-                map.productLoading ->
-                    "Loading ${map.requestedProduct.title.lowercase()}… · showing ${map.displayedProduct.title}"
-                map.displayedProduct != MapProduct.RADAR -> null
                 frameError -> "Radar frame unavailable"
                 reading.data == null ->
                     if (reading.state == Freshness.ERROR) "Radar unavailable" else "Loading radar…"
@@ -890,7 +674,20 @@ class MainActivity : Activity() {
         radarNotice.visibility = if (message == null) View.GONE else View.VISIBLE
     }
 
-    private fun updateRadarAccessibility() = updateMapUi()
+    private fun updateRadarAccessibility() {
+        val seq = sequence
+        val frame = seq?.frames?.getOrNull(frameIndex)
+        timeline.contentDescription =
+            if (frame == null) "Radar timeline, waiting for frames"
+            else {
+                val type = if (frame.lead > 0) "FORECAST +${frame.lead}m" else "OBSERVED"
+                val previous = seq.frames.getOrNull(frameIndex - 1)
+                val gap = previous != null && frame.time - previous.time > 300000
+                val state =
+                    if (frameError) "unavailable; showing retained frame" else repo.radar.state.name
+                "Radar frame ${Times.format(frame.time, "dd MMM HH:mm z", repo.place.zone)}, $type, $state, ${seq.frames.size} frames${if (gap) ", gap before frame" else ""}"
+            }
+    }
 
     private fun renderRadar() {
         val reading = repo.radar
@@ -909,7 +706,6 @@ class MainActivity : Activity() {
         playButton.isEnabled = data != null
         updateRadarNotice()
         updateRadarAccessibility()
-        map.refreshProduct()
     }
 
     private fun requestFrame(index: Int) {
@@ -917,12 +713,12 @@ class MainActivity : Activity() {
         val frame = seq.frames.getOrNull(index) ?: return
         val token = ++decodeToken
         handler.removeCallbacks(advance)
-        frameIndex = index
         val display: (Bitmap) -> Unit = { image ->
             if (!dead && token == decodeToken) {
                 frameError = false
                 map.show(frame, image)
                 frameIndex = index
+                timeline.selected = index
                 updateRadarAccessibility()
                 updateRadarNotice()
                 if (playing && active && radarVisible)
@@ -933,10 +729,8 @@ class MainActivity : Activity() {
             display(it)
             return
         }
-        // Keep the last decoded radar frame visible until its replacement is ready.
         frameError = false
         updateRadarNotice()
-        updateRadarAccessibility()
         decoder.execute {
             val image = BitmapFactory.decodeFile(frame.file)
             handler.post {
@@ -947,8 +741,6 @@ class MainActivity : Activity() {
                     } else if (token == decodeToken) {
                         setPlaying(false)
                         frameError = true
-                        frameIndex = index
-                        updateRadarAccessibility()
                         updateRadarNotice()
                     }
                 }
@@ -968,8 +760,7 @@ class MainActivity : Activity() {
         if (value == Page.TODAY && page != Page.TODAY) hourlyView = null
         if (page == Page.TODAY || page == Page.WEEK) forecastOffsets[page] = forecastScroll.scrollY
         page = value
-        radarVisible = value == Page.MAP
-        map.activate(active && radarVisible)
+        radarVisible = value == Page.RADAR
         radarPanel.visibility = if (radarVisible) View.VISIBLE else View.GONE
         forecastContainer.visibility =
             if (value == Page.TODAY || value == Page.WEEK) View.VISIBLE else View.GONE
@@ -1253,14 +1044,12 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         active = true
-        map.activate(radarVisible)
         if (ready) handler.post(tick)
     }
 
     override fun onPause() {
         map.saveViewport()
         active = false
-        map.activate(false)
         setPlaying(false)
         handler.removeCallbacks(tick)
         super.onPause()
@@ -1268,7 +1057,6 @@ class MainActivity : Activity() {
 
     override fun onSaveInstanceState(out: Bundle) {
         out.putString("page", page.name)
-        out.putString("map-product", map.displayedProduct.name)
         super.onSaveInstanceState(out)
     }
 
@@ -1276,7 +1064,6 @@ class MainActivity : Activity() {
         dead = true
         ready = false
         started = false
-        layerMenu?.dismiss()
         noticesDialog?.dismiss()
         noticesDialog = null
         placeChoices.close()

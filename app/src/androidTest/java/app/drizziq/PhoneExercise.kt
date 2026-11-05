@@ -296,7 +296,7 @@ class PhoneExercise : Instrumentation() {
                     waitFor("Week forecast") {
                         has("Maximum temperature") && has("Minimum temperature")
                     }
-                    click("Map")
+                    click("Radar")
                     waitFor("radar frames") { has("OBSERVED") && has("frames") }
                     fun timeline() = nodes().first { it.className == "android.widget.SeekBar" }
                     val before = timeline().rangeInfo.current
@@ -369,79 +369,9 @@ class PhoneExercise : Instrumentation() {
                     check(layoutError == null) { layoutError.orEmpty() }
                     click("Week")
                     waitFor("weekly table") { has("Maximum temperature") }
-                    click("Map")
-                    waitFor("fixture radar timeline") { has("OBSERVED") }
-                    fun mapView(): RadarMap =
-                        MainActivity::class
-                            .java
-                            .getDeclaredField("map")
-                            .apply { isAccessible = true }
-                            .get(activity) as RadarMap
-                    val gate = java.util.concurrent.CountDownLatch(1)
-                    PhoneFixtures.mapGate = gate
-                    PhoneFixtures.mapFailure = true
-                    click("Map products, Radar")
-                    click("Satellite")
-                    runOnMainSync {
-                        check(mapView().displayedProduct == MapProduct.RADAR)
-                        check(mapView().frame != null)
-                    }
-                    check(has("Play or pause radar animation"))
-                    gate.countDown()
-                    PhoneFixtures.mapGate = null
-                    waitFor("failed switch preserves radar", 10000) { has("Satellite unavailable") }
-                    runOnMainSync { check(mapView().displayedProduct == MapProduct.RADAR) }
-                    PhoneFixtures.mapFailure = false
-                    runOnMainSync { mapView().product(MapProduct.SATELLITE, true) }
-                    waitFor("satellite product", 15000) { has("GEOCOLOUR") }
-                    check(has("EUMETSAT") && !has("Radar frame"))
-                    val historical = PhoneFixtures.now - 2 * 3600_000L - 5 * 60_000L
-                    runOnMainSync { mapView().productTime(historical) }
-                    waitFor("historical satellite frame", 10000) {
-                        var matches = false
-                        runOnMainSync { matches = mapView().productSelection?.time == historical }
-                        matches
-                    }
-                    runOnMainSync {
-                        mapView().product(MapProduct.RADAR)
-                        check(mapView().displayedProduct == MapProduct.RADAR)
-                        mapView().product(MapProduct.SATELLITE)
-                        check(mapView().displayedProduct == MapProduct.SATELLITE) {
-                            "Retained product did not switch immediately"
-                        }
-                    }
-                    click("Map products, Satellite")
-                    click("Temperature")
-                    waitFor("temperature product", 10000) { has("2 m TEMP") && has("Model ") }
-                    var shownTime = 0L
-                    runOnMainSync {
-                        shownTime = mapView().productSelection!!.time
-                        check(
-                            mapView().productSelection!!.run == Times.parse("2026-10-22T18:00:00Z")
-                        )
-                        PhoneFixtures.mapFailure = true
-                        mapView().productTime(shownTime + 3600_000L)
-                    }
-                    waitFor("failed frame retains temperature", 10000) {
-                        has("Temperature unavailable")
-                    }
-                    runOnMainSync { check(mapView().productSelection!!.time == shownTime) }
-                    PhoneFixtures.mapFailure = false
-                    runOnMainSync { mapView().product(MapProduct.TEMPERATURE, true) }
-                    waitFor("temperature recovery", 10000) {
-                        var recovered = false
-                        runOnMainSync {
-                            recovered = mapView().productSelection?.time == shownTime + 3600_000L
-                        }
-                        recovered
-                    }
-                    click("Map products, Temperature")
                     click("Radar")
-                    waitFor("radar restored") { has("OBSERVED") && !has("2 m TEMP") }
-                    result.putString(
-                        "checks",
-                        "missing rain, German locale, independent map timelines, covering model run, atomic and immediate product switches, failed-frame retention and recovery",
-                    )
+                    waitFor("fixture radar timeline") { has("OBSERVED") }
+                    result.putString("checks", "missing rain, German locale, radar timeline")
                 }
                 "fixture-states" -> {
                     check(fixture) { "fixture-states requires fixture=true" }
@@ -475,7 +405,7 @@ class PhoneExercise : Instrumentation() {
                             has("STALE") &&
                             has("Temperature ")
                     }
-                    click("Map")
+                    click("Radar")
                     waitFor("fixture offline radar") { has("Offline radar") }
                     waitFor("fixture requests settle", 5000) { !Http.downloads.active }
                     val before = PhoneFixtures.requests.get()
@@ -901,7 +831,7 @@ class PhoneExercise : Instrumentation() {
                     val after = Rect()
                     runOnMainSync { weather!!.getGlobalVisibleRect(after) }
                     check(before == after) { "Header weather moved while scrolling" }
-                    for (page in listOf("Week", "Map", "Places", "Today")) {
+                    for (page in listOf("Week", "Radar", "Places", "Today")) {
                         click(page)
                         check(has("Temperature ") && has("arrow shows wind flow")) {
                             "Weather header missing on $page"
@@ -1000,7 +930,7 @@ class PhoneExercise : Instrumentation() {
                     )
                 }
                 "recenter-probe" -> {
-                    click("Map")
+                    click("Radar")
                     val place = PlaceStore(appContext).selected()
                     val action =
                         radarMapNode().actionList.first {
@@ -1062,8 +992,8 @@ class PhoneExercise : Instrumentation() {
                             has("Maximum temperature") &&
                             has("Minimum temperature")
                     )
-                    click("Map")
-                    check(tab("Map").isSelected && has("Play or pause radar animation"))
+                    click("Radar")
+                    check(tab("Radar").isSelected && has("Play or pause radar animation"))
                     click("Today")
                     check(tab("Today").isSelected)
                     repeat(20) {
@@ -1166,7 +1096,7 @@ class PhoneExercise : Instrumentation() {
                 }
                 "radar-corruption" -> {
 
-                    click("Map")
+                    click("Radar")
                     waitFor("radar sequence for failed frame", 180000) {
                         nodes().any {
                             it.className == "android.widget.SeekBar" &&
@@ -1385,7 +1315,7 @@ class PhoneExercise : Instrumentation() {
                         waitFor("sun times outside DWD coverage", 10000) {
                             has("Sunrise ") && has("Sunset ")
                         }
-                        click("Map")
+                        click("Radar")
                         check(has("Precipitation map"))
                         check(
                             appContext.checkSelfPermission(
@@ -1566,7 +1496,7 @@ class PhoneExercise : Instrumentation() {
                     )
                 }
                 "viewport-save" -> {
-                    click("Map")
+                    click("Radar")
                     val original = radarMapNode().contentDescription.toString()
                     radarGestures()
                     val moved = radarMapNode().contentDescription.toString()
@@ -1584,7 +1514,7 @@ class PhoneExercise : Instrumentation() {
                     )
                 }
                 "viewport-restore" -> {
-                    click("Map")
+                    click("Radar")
                     val expected =
                         appContext.getSharedPreferences("radar-test", 0).getString("expected", null)
                     check(expected != null) { "Run viewport-save before viewport-restore" }
@@ -1609,7 +1539,7 @@ class PhoneExercise : Instrumentation() {
                     )
                 }
                 "radar-gestures" -> {
-                    click("Map")
+                    click("Radar")
                     radarGestures()
                     result.putString(
                         "checks",
@@ -1617,7 +1547,7 @@ class PhoneExercise : Instrumentation() {
                     )
                 }
                 "radar" -> {
-                    click("Map")
+                    click("Radar")
                     val barBounds =
                         Rect().apply {
                             nodes()
@@ -1804,7 +1734,7 @@ class PhoneExercise : Instrumentation() {
                     click("SAVE CURRENT AS FAVOURITE")
                     enter("FAVOURITE LABEL", "Berlin saved")
                     click("Save")
-                    click("Map")
+                    click("Radar")
                     waitFor("radar frames", 180000) { has("OBSERVED") && has("frames") }
                     val map =
                         nodes().first {
@@ -1889,7 +1819,7 @@ class PhoneExercise : Instrumentation() {
                     ) {
                         "Offline refresh must retain cached forecast values"
                     }
-                    click("Map")
+                    click("Radar")
                     waitFor("offline cached radar") {
                         has("Offline radar") && has("STALE") && has("frames") && has("OBSERVED")
                     }

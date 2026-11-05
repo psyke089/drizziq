@@ -20,9 +20,7 @@ object Http {
         url.protocol == "https" &&
             (Geocoding.allowed(url) ||
                 url.host == "tile.openstreetmap.org" ||
-                (url.host == "opendata.dwd.de" && url.path.startsWith("/weather/")) ||
-                (url.host == "maps.dwd.de" && url.path == "/geoserver/dwd/wms") ||
-                (url.host == "view.eumetsat.int" && url.path == "/geoserver/wms"))
+                (url.host == "opendata.dwd.de" && url.path.startsWith("/weather/")))
 
     private fun checked(url: URL) {
         require(allowed(url)) { "Unapproved data endpoint" }
@@ -341,12 +339,6 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
         select(place)
     }
 
-    private fun decodesRadar(file: File): Boolean {
-        val image = android.graphics.BitmapFactory.decodeFile(file.path) ?: return false
-        image.recycle()
-        return true
-    }
-
     private fun loadRadarCache() {
         radarBusy = true
         workers.execute {
@@ -361,12 +353,6 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
                             manifest.delete()
                             error("Radar cache is invalid or incompatible")
                         }
-                val undecodable = sequence.frames.map { File(it.file) }.filterNot(::decodesRadar)
-                if (undecodable.isNotEmpty()) {
-                    undecodable.forEach { it.delete() }
-                    manifest.delete()
-                    error("Radar cache contains an undecodable image")
-                }
                 Triple(sequence, time, manifest)
             }
                 .getOrNull()
@@ -418,7 +404,7 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
                     val dest = File(directory, "rv-$issue-$lead.png")
                     val pixels = Odim.decode(entry.bytes)
                     require(pixels.time == issue + lead * 60000L) { "DWD frame time mismatch" }
-                    if (!RadarCache.reusable(dest, pixels.grid) || !decodesRadar(dest)) {
+                    if (!RadarCache.reusable(dest, pixels.grid)) {
                         dest.delete()
                         val bitmap =
                             Bitmap.createBitmap(

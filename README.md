@@ -1,21 +1,20 @@
 <h1 align="center">Drizziq</h1>
 
-<p align="center">A dark atmospheric console for weather forecasts, precipitation radar and satellite maps.</p>
+<p align="center">A dark atmospheric console for DWD weather forecasts and precipitation radar.</p>
 
 <p align="center">
   <a href="https://codeberg.org/k4r/drizziq"><img src="docs/badges/codeberg.svg" alt="Codeberg · private repository"></a>
-  <a href="app/build.gradle.kts"><img src="docs/badges/version.svg" alt="Version 1.6.0"></a>
+  <a href="app/build.gradle.kts"><img src="docs/badges/version.svg" alt="Version 1.6.1"></a>
   <img src="docs/badges/android.svg" alt="Android 7.0+ · API 24">
   <a href="LICENSE"><img src="docs/badges/license.svg" alt="Licence MIT"></a>
 </p>
 
 <p align="center">
   <img src="docs/screenshot.png" alt="Drizziq Today view on a OnePlus 5T, with the hourly forecast and SVG weather icons" width="280">
-  <img src="docs/screenshot-map.png" alt="Drizziq Map view with EUMETSAT GeoColour satellite imagery and its own timeline" width="280">
 </p>
 
-Raw captures from the current debug build on a OnePlus 5T / Android 13, using the
-public Munich preset. Weather data © Deutscher Wetterdienst, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Satellite: EUMETSAT / NASA [GeoColour](https://user.eumetsat.int/catalogue/EO%3AEUM%3ADAT%3A0913), CC BY 4.0; nighttime city lights are a static background.
+Raw capture from the debug build on a OnePlus 5T / Android 13, using the
+public Munich preset. Weather data © Deutscher Wetterdienst, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 Drizziq is a native Kotlin Android app for one selected place. It reads weather directly from Deutscher Wetterdienst open data and runs on Android 7.0+ (API 24). No accounts, ads, analytics or tracking. Location permission is optional and used only for an explicit current-location request.
 
@@ -23,9 +22,9 @@ Drizziq is a native Kotlin Android app for one selected place. It reads weather 
 
 - **Today.** A full-width hourly table runs from the selected place’s local midnight through noon tomorrow, including civil-time DST transitions. Temperature is colour-coded with numeric labels; precipitation, wind, gusts and optional humidity retain explicit missing values. A locally calculated sunrise/sunset card works offline.
 - **Week.** A full-width table for the coming seven days: condition, high/low, rain, maximum wind and sunshine. Daily rain/sunshine require complete local days. Today and Week share the station details and last-updated card.
-- **Map.** Starts with the precipitation radar. A visible product selector switches between Radar, EUMETSAT GeoColour satellite imagery and DWD ICON 2 m temperature. Each product has its own times and playback: radar observations/nowcast, past ten-minute satellite acquisitions, or hourly temperature forecasts through tomorrow. Complete viewport images replace the current product atomically; retained images make return switches immediate, and failed downloads keep the last successful image and its timestamp. Temperature includes its model run and a five-degree colour scale. Satellite night city lights are a static NASA background.
+- **Radar.** The dedicated precipitation radar from v1.4.1: pan, zoom, recenter, scrub and play/pause the observation/nowcast timeline. A single playback loop retains the last decoded image until the next is ready. Cached radar keeps its source time; background refreshes mark stale or incomplete data explicitly. Satellite and temperature maps have been removed.
 - **Places.** City searches start after a 400 ms typing pause or immediately from the keyboard; selecting a result is explicit. Optional one-shot location and labelled favourites retain stored provenance. Dialogs close with their corner control, Back or outside dismissal.
-- **Header, navigation and downloads.** A taller header emphasizes current temperature, condition icon and wind to the right of a smaller, two-line location name with ellipsis for long names, shared across every view. Square Today, Week, Map and Places tabs. A thin global progress line tracks weather, city-search and map-tile downloads in a reserved slot, so appearing/disappearing never moves the layout.
+- **Header, navigation and downloads.** A taller header emphasizes current temperature, condition icon and wind to the right of a smaller, two-line location name with ellipsis for long names, shared across every view. Square Today, Week, Radar and Places tabs. A thin global progress line tracks weather, city-search and map-tile downloads in a reserved slot, so appearing/disappearing never moves the layout.
 - **Honest data states.** Forecast freshness is explicit; radar shows loading, cached, stale and error notices when needed. Failed refreshes retain timestamped successful data. Missing DWD fields are omitted; relative humidity is normally absent from MOSMIX. Daily rain and sunshine totals require every hourly interval of a complete local day.
 
 ## Build and install
@@ -52,10 +51,10 @@ The default phone runner uses isolated local fixtures and fails unexpected exter
 
 ## Data
 
-Weather forecasts and precipitation come from `https://opendata.dwd.de/weather/`; temperature maps use DWD's `https://maps.dwd.de/geoserver/dwd/wms`; satellite imagery comes from EUMETSAT's keyless `https://view.eumetsat.int/geoserver/wms` (GeoColour, CC BY 4.0; EUMETSAT/NASA credit). MOSMIX is a station forecast: the app chooses the nearest bundled point within 50 km and displays its distance. DWD radar covers Germany and its surroundings. The keyless OpenStreetMap basemap has visible attribution and caches only tiles viewed on screen.
+Weather forecasts and precipitation come from `https://opendata.dwd.de/weather/`. MOSMIX is a station forecast: the app chooses the nearest bundled point within 50 km and displays its distance. DWD radar covers Germany and its surroundings. The keyless OpenStreetMap basemap has visible attribution and caches only tiles viewed on screen.
 
 City search sends typed search text to the free, non-commercial Open-Meteo geocoding service after a short pause, with GeoNames attribution. Device positions resolve to forecast points locally, without reverse geocoding. All app icon sources are editable SVGs in [artwork/icons](artwork/icons/README.md), compiled automatically to native Android vectors. [AGENTS.md](AGENTS.md#data-sources-and-behavior) records data sources, processing, provenance and metadata regeneration.
 
 ## License
 
-[MIT](LICENSE). DWD data, EUMETSAT imagery, OpenStreetMap data, timezone data and dependencies retain their [respective licences](app/src/main/assets/notices.txt). The public source mirror, including the bundled timezone database offered under ODbL, is [psyke089/drizziq](https://github.com/psyke089/drizziq).
+[MIT](LICENSE). DWD data, OpenStreetMap data, timezone data and dependencies retain their [respective licences](app/src/main/assets/notices.txt). The public source mirror, including the bundled timezone database offered under ODbL, is [psyke089/drizziq](https://github.com/psyke089/drizziq).
