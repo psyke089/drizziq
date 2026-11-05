@@ -80,7 +80,7 @@ class PlaceStore(private val prefs: PlacePreferences) {
     /** False when the commit failed and the previous list was restored; the caller can retry. */
     fun delete(p: Place): Boolean =
         try {
-            write(favourites().filterNot { it == p })
+            write(favourites().filterNot { it.lat == p.lat && it.lon == p.lon })
             true
         } catch (error: Exception) {
             false

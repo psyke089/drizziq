@@ -137,7 +137,8 @@ internal object PhoneFixtures {
         // Synthetic player timeline with genuine decoded DWD bitmap pixels.
         val frames =
             (-12..24).map { step ->
-                val file = File(dir, "rv-fixture-$step.png")
+                val origin = if (step < 0) issue + step * 300000L else issue
+                val file = File(dir, "rv-$origin-${maxOf(0, step * 5)}.png")
                 if (!file.isFile) frameFile.copyTo(file)
                 RadarFrame(
                     issue + step * 300000L,

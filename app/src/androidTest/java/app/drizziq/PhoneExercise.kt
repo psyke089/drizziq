@@ -1439,6 +1439,13 @@ class PhoneExercise : Instrumentation() {
                     check(PlaceStore(appContext).selected() == original) {
                         "Search selected a candidate without a tap"
                     }
+                    if (fixture) {
+                        val beforeRetry = PhoneFixtures.requests.get()
+                        submitSearch()
+                        waitFor("keyboard refresh over warm city cache", 5000) {
+                            PhoneFixtures.requests.get() > beforeRetry && has("match")
+                        }
+                    }
                     enter("CITY NAME", "Berlin")
                     waitFor("edited query publishes only its own results", 10000) {
                         val results =
@@ -1555,13 +1562,57 @@ class PhoneExercise : Instrumentation() {
                             .getDeclaredField("repo")
                             .apply { isAccessible = true }
                             .get(activity) as Repository
+                    waitFor("initial forecast settles") { !repo.forecast.refreshing }
+                    check(repo.radar.data == null && repo.radarProgress.phase == RadarPhase.IDLE) {
+                        "Hidden radar started loading before its page was opened"
+                    }
+                    AppPlatform.connected = false
+                    runOnMainSync { repo.connection() }
+                    val offlineRequests = PhoneFixtures.requests.get()
                     click("Radar")
-                    waitFor("initial radar settles") {
+                    waitFor("offline cache loads without refresh failure") {
                         repo.radar.data != null && !repo.radar.refreshing
                     }
+                    check(repo.radarProgress.phase == RadarPhase.IDLE)
+                    check(PhoneFixtures.requests.get() == offlineRequests)
+                    AppPlatform.connected = true
+                    runOnMainSync { repo.connection() }
                     val cached = requireNotNull(repo.radar.data)
                     val directory = java.io.File(appContext.filesDir, "data")
                     val receipt = repo.radar.fetched
+                    val decoder =
+                        MainActivity::class
+                            .java
+                            .getDeclaredField("decoder")
+                            .apply { isAccessible = true }
+                            .get(activity) as java.util.concurrent.ThreadPoolExecutor
+                    val gateDecode = java.util.concurrent.CountDownLatch(1)
+                    val startedDecode = java.util.concurrent.CountDownLatch(1)
+                    decoder.execute {
+                        startedDecode.countDown()
+                        gateDecode.await(10, java.util.concurrent.TimeUnit.SECONDS)
+                    }
+                    check(startedDecode.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                    try {
+                        val requestFrame =
+                            MainActivity::class
+                                .java
+                                .getDeclaredMethod("requestFrame", Int::class.javaPrimitiveType)
+                                .apply { isAccessible = true }
+                        runOnMainSync {
+                            repeat(100) { requestFrame.invoke(activity, it % cached.frames.size) }
+                            requestFrame.invoke(activity, cached.frames.lastIndex)
+                        }
+                        check(decoder.queue.size <= 1) { "Scrubbing queued obsolete image decodes" }
+                    } finally {
+                        gateDecode.countDown()
+                    }
+                    waitFor("latest scrub selection displays", 10000) {
+                        nodes().any {
+                            it.className == "android.widget.SeekBar" &&
+                                it.rangeInfo.current.toInt() == cached.frames.lastIndex
+                        }
+                    }
                     val source = cached.frames.filter { it.issue == cached.issue }
                     RadarCache.save(
                         directory,
@@ -1605,7 +1656,11 @@ class PhoneExercise : Instrumentation() {
                                 )
                             check(
                                 time.text.toString() ==
-                                    Times.format(cached.issue, "HH:mm", repo.place.zone)
+                                    Times.format(
+                                        cached.frames.last().time,
+                                        "HH:mm",
+                                        repo.place.zone,
+                                    )
                             )
                         }
                         click("Clear radar cache")

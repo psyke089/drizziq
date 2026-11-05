@@ -21,9 +21,9 @@ class RadarCacheTest {
 
     private fun sequence(file: File): RadarSequence =
         RadarSequence(
-            listOf(RadarFrame(issue + 300_000, issue, 0, grid, file.path)),
+            listOf(RadarFrame(issue, issue, 0, grid, file.path)),
             issue,
-            historyComplete = true,
+            historyComplete = false,
         )
 
     private fun writeManifest(directory: File, sequence: RadarSequence, historyComplete: Boolean) {
@@ -31,10 +31,68 @@ class RadarCacheTest {
     }
 
     @Test
+    fun corruptFrame_preservesValidNeighborsAndDisablesConditionalLatestUntilRepaired() {
+        val directory = temp.newFolder("partial")
+        val first = frame(directory, "rv-$issue-0.png", resource("/radar-1100x1200.png"))
+        val next = frame(directory, "rv-$issue-5.png", resource("/radar-1100x1200.png"))
+        val frames =
+            listOf(
+                RadarFrame(issue, issue, 0, grid, first.path),
+                RadarFrame(issue + 300_000, issue, 5, grid, next.path),
+            )
+        RadarCache.save(directory, RadarSnapshot(RadarSequence(frames, issue, false), 42, "v1"))
+        next.writeText("broken")
+        val read = RadarCache.read(directory)
+        assertEquals(listOf(frames.first()), read.sequence!!.frames)
+        assertFalse(read.sequence!!.historyComplete)
+        assertFalse(read.snapshot!!.latestComplete)
+        assertEquals(42L, read.snapshot!!.downloadedAt)
+        assertEquals(listOf(next), read.invalid)
+        read.removeInvalid()
+        assertTrue(first.isFile)
+        assertFalse(next.exists())
+    }
+
+    @Test
+    fun manifest_rejectsInvalidTimeLeadAndGridWhileKeepingOtherValidFrames() {
+        val directory = temp.newFolder("semantics")
+        val png = frame(directory, "rv-$issue-0.png", resource("/radar-1100x1200.png"))
+        for ((field, bad) in
+            listOf(
+                "time" to issue + 1,
+                "lead" to 3,
+                "lead" to 125,
+                "dx" to 0.0,
+                "dy" to -1.0,
+                "left" to "NaN",
+            )) {
+            writeManifest(directory, sequence(png), false)
+            val manifest = File(directory, "radar.json")
+            val json = JSONObject(manifest.readText())
+            json.getJSONArray("frames").getJSONObject(0).put(field, bad)
+            manifest.writeText(json.toString())
+            assertNull("$field=$bad", RadarCache.read(directory).sequence)
+        }
+    }
+
+    @Test
+    fun manifest_sortsFramesAndRejectsDuplicateMembers() {
+        val directory = temp.newFolder("ordering")
+        val png = frame(directory, "rv-$issue-0.png", resource("/radar-1100x1200.png"))
+        val observed = sequence(png).frames.single()
+        val future = observed.copy(time = issue + 300_000, lead = 5)
+        writeManifest(directory, RadarSequence(listOf(future, observed), issue, false), false)
+        assertEquals(listOf(observed, future), RadarCache.read(directory).sequence!!.frames)
+        writeManifest(directory, RadarSequence(listOf(observed, observed), issue, false), false)
+        assertNull(RadarCache.read(directory).sequence)
+    }
+
+    @Test
     fun saveAndRead_preservesDownloadTimeAndHttpValidatorsWithoutUsingManifestMtime() {
         val directory = temp.newFolder("receipts")
         val png = frame(directory, "rv-$issue-0.png", resource("/radar-1100x1200.png"))
-        val snapshot = RadarSnapshot(sequence(png), 123_456L, "etag-v1", "old-date")
+        val snapshot =
+            RadarSnapshot(sequence(png), 123_456L, "etag-v1", "old-date", latestComplete = false)
         RadarCache.save(directory, snapshot)
         File(directory, "radar.json").setLastModified(999_999L)
 
@@ -174,31 +232,6 @@ class RadarCacheTest {
             )
 
         assertNull(RadarCache.read(directory).sequence)
-    }
-
-    @Test
-    fun reusable_acceptsMatchingCompletePngAndRejectsCorruptionThenAcceptsRegeneration() {
-        val directory = temp.newFolder("data")
-        val png = file(directory, "rv-$issue-0.png", resource("/radar-1100x1200.png"))
-
-        assertTrue(RadarCache.reusable(png, grid))
-
-        val complete = png.readBytes()
-        png.writeBytes(complete.copyOf(complete.size - 1))
-        assertFalse(RadarCache.reusable(png, grid))
-
-        png.writeBytes(complete)
-        assertTrue(RadarCache.reusable(png, grid))
-    }
-
-    @Test
-    fun reusable_rejectsValidPngWithOtherDimensions() {
-        val directory = temp.newFolder("data")
-        val png = file(directory, "rv-$issue-0.png", resource("/radar-1x1.png"))
-
-        assertFalse(RadarCache.reusable(png, grid))
-        assertEquals(1 to 1, Png.dimensions(png))
-        assertEquals(1100 to 1200, Png.dimensions(resource("/radar-1100x1200.png")))
     }
 
     @Test

@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://codeberg.org/k4r/drizziq"><img src="docs/badges/codeberg.svg" alt="Codeberg · private repository"></a>
-  <a href="app/build.gradle.kts"><img src="docs/badges/version.svg" alt="Version 1.6.4"></a>
+  <a href="app/build.gradle.kts"><img src="docs/badges/version.svg" alt="Version 1.6.5"></a>
   <img src="docs/badges/android.svg" alt="Android 7.0+ · API 24">
   <a href="LICENSE"><img src="docs/badges/license.svg" alt="Licence MIT"></a>
 </p>
@@ -22,11 +22,11 @@ Drizziq is a native Kotlin Android app for one selected place. It reads weather 
 ## What it does
 
 - **Today.** A full-width hourly table runs from the selected place’s local midnight through noon tomorrow, including civil-time DST transitions. Temperature is colour-coded with numeric labels; precipitation, wind, gusts and optional humidity retain explicit missing values. A locally calculated sunrise/sunset card works offline.
-- **Week.** A full-width table for the coming seven days: condition, high/low, rain, maximum wind and sunshine. Daily rain/sunshine require complete local days. Today and Week share the station details and last-updated card.
+- **Week.** A full-width table for the coming seven days: condition, high/low, rain, maximum wind and sunshine. Earlier and latest forecast hours are combined, with latest values taking priority; daily rain/sunshine require complete local days. Today and Week share the station details and last-updated card.
 - **Radar.** Pan, zoom, recenter, scrub and play/pause the observation/nowcast timeline. The current image appears first; ready images fill a fixed time axis as loading continues, with the displayed time on its right. Valid cached images are reused, and unchanged DWD issues avoid another archive download. A translucent details panel shows the last successful download and separate download, image and history progress, with actions to refresh or clear only the radar cache. A single playback loop retains the last decoded image until the next is ready; stale data and historical gaps stay explicit. Satellite and temperature maps have been removed.
-- **Places.** City searches start after a 400 ms typing pause or immediately from the keyboard; selecting a result is explicit. Optional one-shot location and labelled favourites retain stored provenance. Dialogs close with their corner control, Back or outside dismissal.
+- **Places.** City searches start after a 400 ms typing pause or immediately from the keyboard; keyboard Search refreshes cached results, subject to provider retry limits; selecting a result is explicit. Optional one-shot location and labelled favourites retain stored provenance. Dialogs close with their corner control, Back or outside dismissal.
 - **Header, navigation and downloads.** A taller header emphasizes current temperature, condition icon and wind to the right of a smaller, two-line location name with ellipsis for long names, shared across every view. Square Today, Week, Radar and Places tabs. A thin global progress line tracks weather, city-search and map-tile downloads in a reserved slot, so appearing/disappearing never moves the layout.
-- **Honest data states.** Forecast freshness is explicit; radar shows loading, cached, stale and error notices when needed. Failed refreshes retain timestamped successful data. Missing DWD fields are omitted; relative humidity is normally absent from MOSMIX. Daily rain and sunshine totals require every hourly interval of a complete local day.
+- **Honest data states.** Forecast freshness is explicit; radar shows loading, cached, stale and error notices when needed. Failed refreshes retain timestamped successful data. Healthy automatic forecast checks run at a 30-minute download interval (missing, stale or failed data retries sooner), and radar polls every five minutes while visible; manual refresh remains immediate. The header uses the nearest forecast hour within one hour; Today highlights the containing hour. Missing DWD fields are omitted; relative humidity is normally absent from MOSMIX. Daily rain and sunshine totals require every hourly interval of a complete local day.
 
 ## Build and install
 

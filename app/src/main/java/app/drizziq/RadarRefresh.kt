@@ -26,6 +26,7 @@ internal data class RadarSnapshot(
     val downloadedAt: Long,
     val etag: String? = null,
     val lastModified: String? = null,
+    val latestComplete: Boolean = true,
 )
 
 internal data class RadarMember(val issue: Long, val lead: Int) {
@@ -73,7 +74,7 @@ internal class RadarRefresh(
         }
         report(status)
         val reply =
-            latest(cached) { bytes, total ->
+            latest(cached?.takeIf { it.latestComplete }) { bytes, total ->
                 checkRunning()
                 report(status.copy(bytes = bytes, totalBytes = total))
             }
@@ -154,6 +155,7 @@ internal class RadarRefresh(
             }
             is HttpReply.NotModified -> {
                 val saved = requireNotNull(cached) { "DWD returned 304 without cached radar" }
+                require(saved.latestComplete) { "DWD returned 304 for incomplete cached radar" }
                 issue = saved.sequence.issue
                 frames +=
                     saved.sequence.frames.filter {

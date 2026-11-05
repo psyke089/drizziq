@@ -7,8 +7,8 @@ android {
         applicationId = "app.drizziq"
         minSdk = 24
         targetSdk = 37
-        versionCode = 12
-        versionName = "1.6.4"
+        versionCode = 13
+        versionName = "1.6.5"
         testInstrumentationRunner = "app.drizziq.PhoneExercise"
     }
     compileOptions {
@@ -21,7 +21,7 @@ android {
     lint {
         warningsAsErrors = true
     }
-    sourceSets.getByName("androidTest").assets.srcDir("src/test/resources")
+    sourceSets.getByName("androidTest").assets.directories.add("src/test/resources")
 }
 
 dependencies {
@@ -32,8 +32,8 @@ dependencies {
     testImplementation("org.json:json:20260814")
 }
 
-val generateIcons by
-    tasks.registering(Exec::class) {
+val generateIcons =
+    tasks.register<Exec>("generateIcons") {
         group = "build"
         description = "Generate native vectors from the editable SVG icon sources"
         val sources = rootProject.fileTree("artwork/icons") { include("**/*.svg") }

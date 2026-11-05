@@ -156,11 +156,11 @@ class PlaceChoices(
                 activity.getText(R.string.city_search_title),
             )
         track(d) { token }
-        fun submit() {
+        fun submit(text: String, force: Boolean) {
             if (closed || !foreground) return
             val query =
                 try {
-                    Geocoding.query(input.text.toString())
+                    Geocoding.query(text)
                 } catch (error: IllegalArgumentException) {
                     input.error = error.message
                     status.text = error.message
@@ -178,7 +178,7 @@ class PlaceChoices(
                 val result =
                     search.search(
                         query,
-                        false,
+                        force,
                         connected,
                         { generation.isCurrent(request) },
                         { action -> generation.runIfCurrent(request, action) },
@@ -263,7 +263,7 @@ class PlaceChoices(
                     Cancel { handler.removeCallbacks(task) }
                 },
                 { token = invalidate(false) },
-                { submit() },
+                { text, force -> submit(text, force) },
             )
         searchDebounce = debounce
         input.addTextChangedListener(

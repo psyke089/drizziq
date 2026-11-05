@@ -10,6 +10,42 @@ class ForecastLookupTest {
         Forecast(point.copy(id = id), issue, listOf(Hour(issue + 3600000, mapOf("TTT" to 280.0))))
 
     @Test
+    fun sameStationLiveReading_skipsDiskAndNeverRegressesBeforeNetworkCompletes() {
+        val retained = Reading(forecast(), Freshness.LIVE, 99L)
+        val source =
+            Source().apply {
+                saved = CachedForecast(forecast(), 77)
+                fetched = forecast()
+            }
+        val readings = mutableListOf<Reading<Forecast>>()
+        ForecastLookup({ StationIndex(listOf(point)) }, source, { 1000 }).load(
+            Place.MUNICH,
+            retained,
+        ) {
+            readings += it
+        }
+        assertEquals(0, source.reads)
+        assertEquals(1, source.requests)
+        assertTrue(readings.all { it.state == Freshness.LIVE })
+        assertTrue(readings.all { it.fetched!! >= 99L })
+    }
+
+    @Test
+    fun offlineWithoutCache_reportsMissingForecastAndSkipsTransport() {
+        val source = Source()
+        val readings = mutableListOf<Reading<Forecast>>()
+        ForecastLookup({ StationIndex(listOf(point)) }, source, { 1000 }).load(
+            Place.MUNICH,
+            online = false,
+        ) {
+            readings += it
+        }
+        assertNull(readings.single().data)
+        assertEquals("Offline · no saved forecast", readings.single().message)
+        assertEquals(0, source.requests)
+    }
+
+    @Test
     fun resolution_failedWeatherFetch_stillPublishesMatchingStationBeforeNetwork() {
         var resolved: StationHit? = null
         val source =

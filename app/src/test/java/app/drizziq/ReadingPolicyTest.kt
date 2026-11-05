@@ -5,6 +5,28 @@ import org.junit.Test
 
 class ReadingPolicyTest {
     @Test
+    fun automaticRefresh_usesReceiptIntervalAndRetriesMissingOrFailedData() {
+        val live = Reading("forecast", Freshness.LIVE, 100L)
+        assertFalse(live.needsRefresh(199, 100))
+        assertTrue(live.needsRefresh(200, 100))
+        assertTrue(live.needsRefresh(99, 100))
+        assertTrue(Reading<String>().needsRefresh(100, 100))
+        assertTrue(live.failed("failed").needsRefresh(101, 100))
+        assertFalse(live.copy(refreshing = true).needsRefresh(500, 100))
+    }
+
+    @Test
+    fun offlineMessage_distinguishesEmptyFromSavedPayloadWithoutChangingReceipt() {
+        val empty = Reading<String>().offline("forecast")
+        assertEquals(Freshness.ERROR, empty.state)
+        assertEquals("Offline · no saved forecast", empty.message)
+        val saved = Reading("frames", Freshness.LIVE, 42L).offline("radar")
+        assertEquals("Offline · showing saved radar", saved.message)
+        assertEquals(42L, saved.fetched)
+        assertEquals(Freshness.STALE, saved.state)
+    }
+
+    @Test
     fun issueFreshness_atExpiryBoundary_remainsLiveUntilNextMillisecond() {
         val issue = 100_000L
         assertEquals(Freshness.LIVE, issueFreshness(issue, issue + 1_000, 1_000))

@@ -121,7 +121,12 @@ private class FittingTemperature(context: Context) : android.widget.TextView(con
         super.onLayout(changed, left, top, right, bottom)
         val available = width - paddingLeft - paddingRight
         if (available <= 0 || text.isEmpty()) return
-        val maximum = 42f * resources.displayMetrics.scaledDensity
+        val maximum =
+            android.util.TypedValue.applyDimension(
+                android.util.TypedValue.COMPLEX_UNIT_SP,
+                42f,
+                resources.displayMetrics,
+            )
         val previous = paint.textSize
         paint.textSize = maximum
         val measured = paint.measureText(text, 0, text.length)

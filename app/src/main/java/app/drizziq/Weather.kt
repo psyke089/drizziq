@@ -208,7 +208,10 @@ data class Forecast(
         val tz = Zones.get(zone)
         fun dateOf(time: Long) = Instant.ofEpochMilli(time - 1).atZone(tz).toLocalDate()
         val today = Instant.ofEpochMilli(now).atZone(tz).toLocalDate()
-        return hours
+        return (earlier + hours)
+            .associateBy { it.time }
+            .values
+            .sortedBy { it.time }
             .filter { dateOf(it.time) >= today }
             .groupBy { dateOf(it.time) }
             .values

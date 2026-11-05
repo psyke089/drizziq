@@ -26,10 +26,9 @@ object Http {
         require(allowed(url)) { "Unapproved data endpoint" }
     }
 
-    fun bytes(address: String, limit: Int = 32000000, range: String? = null): ByteArray =
-        downloads.track {
-            request(address, limit, range)
-        }
+    fun bytes(address: String, limit: Int = 32000000): ByteArray = downloads.track {
+        request(address, limit)
+    }
 
     /**
      * Conditional image/data GET. Persisted validators are only attached when present; a 304 is
@@ -84,7 +83,7 @@ object Http {
                 }
                 require(status == 200) { "Server returned HTTP $status" }
                 return HttpReply.Ok(
-                    read(c, limit, range = null, status = status, progress = progress),
+                    read(c, limit, progress),
                     responseEtag,
                     responseModified,
                 )
@@ -95,15 +94,15 @@ object Http {
         throw IllegalArgumentException("Too many redirects")
     }
 
-    private fun request(address: String, limit: Int, range: String?): ByteArray =
-        get(address, range) { connection, status -> read(connection, limit, range, status) }
+    private fun request(address: String, limit: Int): ByteArray =
+        get(address) { connection -> read(connection, limit) }
 
     /** Read only the observed first member; closing the stream avoids fetching old forecasts. */
     internal fun firstTarEntry(
         address: String,
         open: (URL) -> HttpURLConnection = AppPlatform::open,
     ): Tar.Entry = downloads.track {
-        get(address, open = open) { connection, _ ->
+        get(address, open = open) { connection ->
             val input = connection.inputStream
             try {
                 Tar.first(input)
@@ -117,9 +116,8 @@ object Http {
 
     private fun <T> get(
         address: String,
-        range: String? = null,
         open: (URL) -> HttpURLConnection = AppPlatform::open,
-        consume: (HttpURLConnection, Int) -> T,
+        consume: (HttpURLConnection) -> T,
     ): T {
         var url = URL(address)
         repeat(4) {
@@ -130,7 +128,6 @@ object Http {
                     readTimeout = 20000
                     instanceFollowRedirects = false
                     setRequestProperty("User-Agent", USER_AGENT)
-                    if (range != null) setRequestProperty("Range", "bytes=$range")
                 }
             try {
                 val status = connection.responseCode
@@ -138,10 +135,10 @@ object Http {
                     url = URL(url, connection.getHeaderField("Location") ?: error("Empty redirect"))
                     return@repeat
                 }
-                require(status == 200 || (range != null && status == 206)) {
+                require(status == 200) {
                     "Server returned HTTP $status"
                 }
-                return consume(connection, status)
+                return consume(connection)
             } finally {
                 connection.disconnect()
             }
@@ -152,42 +149,20 @@ object Http {
     private fun read(
         c: HttpURLConnection,
         limit: Int,
-        range: String?,
-        status: Int,
         progress: ((Long, Long?) -> Unit)? = null,
     ): ByteArray =
         c.inputStream.use { input ->
-            // Servers may ignore Range. Select the requested bytes locally in that case.
-            val start = range?.substringBefore('-')?.toInt() ?: 0
-            val length = range?.substringAfter('-')?.toInt()?.let { it - start + 1 }
-            if (range != null && status == 200) {
-                var n = 0
-                while (n < start) {
-                    val skipped = input.skip((start - n).toLong()).toInt()
-                    if (skipped == 0) {
-                        require(input.read() >= 0)
-                        n++
-                    } else n += skipped
-                }
-            }
             val total = c.getHeaderField("Content-Length")?.toLongOrNull()?.takeIf { it >= 0 }
             progress?.invoke(0, total)
             val out = ByteArrayOutputStream()
             val buffer = ByteArray(8192)
-            while (length == null || out.size() < length) {
-                val n =
-                    input.read(
-                        buffer,
-                        0,
-                        if (length == null) buffer.size
-                        else minOf(buffer.size, length - out.size()),
-                    )
+            while (true) {
+                val n = input.read(buffer)
                 if (n < 0) break
                 require(out.size() + n <= limit) { "Data response too large" }
                 out.write(buffer, 0, n)
                 progress?.invoke(out.size().toLong(), total)
             }
-            if (length != null) require(out.size() == length) { "Truncated DWD response" }
             out.toByteArray()
         }
 }
@@ -256,8 +231,8 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
     fun connection(): Boolean {
         online = AppPlatform.online(context)
         if (!online) {
-            forecast = forecast.failed("Offline · last successful data retained")
-            radar = radar.failed("Offline · last successful frames retained")
+            forecast = forecast.offline("forecast")
+            radar = radar.offline("radar")
         }
         changed()
         return online
@@ -358,15 +333,13 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
                 post {
                     if (generation.isCurrent(token)) {
                         forecast =
-                            if (!online && reading.data != null)
-                                reading.failed("Offline · last matching forecast retained")
+                            if (!online && reading.data != null) reading.offline("forecast")
                             else reading
                         changed()
                     }
                 }
             }
         }
-        if (radar.data == null && !radarBusy) loadRadarCache()
     }
 
     fun refreshForecast() {
@@ -378,11 +351,23 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
         post { if (radarGeneration.isCurrent(token)) action() }
     }
 
+    fun showRadar() {
+        if (radarBusy || closed.get()) return
+        if (radar.data == null) loadRadarCache()
+        else if (online && radar.needsRefresh(AppPlatform.now(), 300_000L)) refreshRadar()
+    }
+
+    private fun readRadarCache(): RadarSnapshot? {
+        val read = RadarCache.read(directory)
+        read.removeInvalid()
+        return read.snapshot
+    }
+
     private fun loadRadarCache() {
         radarBusy = true
         val token = radarGeneration.next()
         radarWorker.execute {
-            val saved = runCatching { RadarCache.read(directory).snapshot }.getOrNull()
+            val saved = runCatching { readRadarCache() }.getOrNull()
             postRadar(token) {
                 if (saved != null) {
                     radar =
@@ -390,12 +375,18 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
                             saved.sequence,
                             if (online) Freshness.CACHED else Freshness.STALE,
                             saved.downloadedAt,
-                            "Saved radar · checking DWD",
+                            if (online) "Saved radar · checking DWD"
+                            else "Offline · showing saved radar",
                         )
                     changed()
                 }
                 radarBusy = false
-                refreshRadar()
+                if (online) refreshRadar()
+                else {
+                    radar = radar.offline("radar")
+                    radarProgress = RadarProgress()
+                    changed()
+                }
             }
         }
     }
@@ -416,7 +407,7 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
             try {
                 check(online) { "Offline" }
                 AtomicFiles.cleanup(directory, AppPlatform.now())
-                val saved = runCatching { RadarCache.read(directory).snapshot }.getOrNull()
+                val saved = runCatching { readRadarCache() }.getOrNull()
                 val base = "${Http.WEATHER}radar/composite/rv/"
                 val result =
                     RadarRefresh(

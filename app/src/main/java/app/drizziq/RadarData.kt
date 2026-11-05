@@ -220,7 +220,7 @@ object Odim {
             val data = dataset.data
             val colors = IntArray(w * h)
             for (y in 0 until h) {
-                val row = JArray.get(data, y)
+                val row = requireNotNull(JArray.get(data, y)) { "Missing radar row" }
                 for (x in 0 until w) {
                     val value = (JArray.get(row, x) as Number).toDouble()
                     // jHDF returns unsigned uint32 as long; accept its signed representation too.

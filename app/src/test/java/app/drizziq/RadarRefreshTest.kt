@@ -33,6 +33,37 @@ class RadarRefreshTest {
     }
 
     @Test
+    fun damagedLatestCache_doesNotSendValidatorsAndStillReusesValidFrames() {
+        val saved =
+            RadarSnapshot(
+                RadarSequence(listOf(frame()), issue, false),
+                100L,
+                "etag",
+                "modified",
+                latestComplete = false,
+            )
+        val decoded = mutableListOf<Int>()
+        val result =
+            RadarRefresh(
+                    latest = { cached, _ ->
+                        assertNull(cached)
+                        HttpReply.Ok(archive(entry(), entry(lead = 5)), "repaired", null)
+                    },
+                    observed = { error("history unavailable") },
+                    decode = { value ->
+                        val member = RadarMember.parse(value.name)
+                        decoded += member.lead
+                        frame(member.issue, member.lead)
+                    },
+                    now = { 200L },
+                )
+                .load(saved)
+        assertEquals(listOf(5), decoded)
+        assertTrue(result.latestComplete)
+        assertEquals(200L, result.downloadedAt)
+    }
+
+    @Test
     fun currentImageIsPublishedBeforeForecastDecodeAndHistoryRequests() {
         val events = mutableListOf<String>()
         val statuses = mutableListOf<RadarProgress>()

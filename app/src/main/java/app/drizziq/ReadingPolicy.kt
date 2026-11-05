@@ -43,3 +43,16 @@ internal class RequestGeneration {
         return true
     }
 }
+
+/** Automatic polling is independent of the product's stale-issue threshold. */
+internal fun Reading<*>.needsRefresh(now: Long, interval: Long): Boolean =
+    !refreshing &&
+        (data == null ||
+            fetched == null ||
+            now < fetched ||
+            now - fetched >= interval ||
+            state == Freshness.STALE ||
+            state == Freshness.ERROR)
+
+internal fun <T> Reading<T>.offline(product: String): Reading<T> =
+    failed("Offline · ${if (data == null) "no saved $product" else "showing saved $product"}")

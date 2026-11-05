@@ -85,7 +85,7 @@ class RadarMap(context: Context) : View(context) {
             }
         }
 
-    var online = true
+    @Volatile var online = true
     var frame: RadarFrame? = null
         private set
 
@@ -492,15 +492,25 @@ class RadarTimeline(context: Context) : View(context) {
             android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
                 .ACTION_SCROLL_BACKWARD
         )
-        if (frames.isNotEmpty())
-            info.rangeInfo =
-                android.view.accessibility.AccessibilityNodeInfo.RangeInfo.obtain(
-                    android.view.accessibility.AccessibilityNodeInfo.RangeInfo.RANGE_TYPE_INT,
-                    0f,
-                    (frames.size - 1).toFloat(),
-                    selected.toFloat(),
-                )
+        if (frames.isNotEmpty()) info.rangeInfo = frameRange()
     }
+
+    @Suppress("DEPRECATION") // The constructor was added in API 30.
+    private fun frameRange(): android.view.accessibility.AccessibilityNodeInfo.RangeInfo =
+        if (android.os.Build.VERSION.SDK_INT >= 30)
+            android.view.accessibility.AccessibilityNodeInfo.RangeInfo(
+                android.view.accessibility.AccessibilityNodeInfo.RangeInfo.RANGE_TYPE_INT,
+                0f,
+                (frames.size - 1).toFloat(),
+                selected.toFloat(),
+            )
+        else
+            android.view.accessibility.AccessibilityNodeInfo.RangeInfo.obtain(
+                android.view.accessibility.AccessibilityNodeInfo.RangeInfo.RANGE_TYPE_INT,
+                0f,
+                (frames.size - 1).toFloat(),
+                selected.toFloat(),
+            )
 
     override fun performAccessibilityAction(action: Int, args: android.os.Bundle?): Boolean {
         val next =

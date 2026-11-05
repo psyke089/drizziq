@@ -9,7 +9,6 @@ object IconAssets {
             "info" -> R.drawable.ic_info
             "launcher-foreground" -> R.drawable.ic_launcher_foreground
             "launcher-legacy" -> R.drawable.ic_launcher_legacy
-            "layers" -> R.drawable.ic_layers
             "location-crosshair" -> R.drawable.ic_location_crosshair
             "logo" -> R.drawable.ic_logo
             "metric-direction" -> R.drawable.ic_metric_direction

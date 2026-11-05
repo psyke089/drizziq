@@ -75,13 +75,13 @@ class ForecastLookup(
             return result
         }
         val cached = runCatching {
-            source.cached(hit.station)
+            if (retained.data == null) source.cached(hit.station) else null
         }
             .getOrNull()
             ?.takeIf { it.forecast.station.id == hit.station.id }
         if (
             cached != null &&
-                (retained.data == null || cached.forecast.issue >= retained.data!!.issue)
+                (retained.data == null || cached.forecast.issue > retained.data!!.issue)
         ) {
             retained =
                 Reading(
@@ -95,7 +95,7 @@ class ForecastLookup(
         }
         if (!isCurrent()) return
         if (!online) {
-            emit(retained.failed("Offline · last matching forecast retained"))
+            emit(retained.offline("forecast"))
             return
         }
         try {

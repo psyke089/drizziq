@@ -65,11 +65,19 @@ class MainActivity : Activity() {
     private var requestedFrameTime: Long? = null
     private var radarBackCallback: android.window.OnBackInvokedCallback? = null
     private val handler = Handler(Looper.getMainLooper())
-    private val decoder = Executors.newSingleThreadExecutor()
+    private val decoder =
+        ThreadPoolExecutor(
+            1,
+            1,
+            0L,
+            TimeUnit.MILLISECONDS,
+            ArrayBlockingQueue(1),
+            ThreadPoolExecutor.DiscardOldestPolicy(),
+        )
     private val frames = object : android.util.LruCache<String, Bitmap>(3) {}
     private var sequence: RadarSequence? = null
     private var frameIndex = 0
-    private var decodeToken = 0
+    @Volatile private var decodeToken = 0
     private var playing = false
     private var active = false
     private var started = false
@@ -140,7 +148,7 @@ class MainActivity : Activity() {
                 if (!active || dead) return
                 repo.age()
                 render()
-                if (repo.online && AppPlatform.now() - lastRefresh > 300000) refresh()
+                if (repo.online && AppPlatform.now() - lastRefresh > 300000) refresh(false)
                 handler.postDelayed(this, 30000)
             }
         }
@@ -195,27 +203,44 @@ class MainActivity : Activity() {
         )
     }
 
+    // These platform fallbacks keep API 24 support without a UI compatibility dependency.
+    @Suppress("DEPRECATION")
+    private fun configureWindowInsets() {
+        if (android.os.Build.VERSION.SDK_INT >= 30 && android.os.Build.VERSION.SDK_INT < 35)
+            window.setDecorFitsSystemWindows(false)
+        else if (android.os.Build.VERSION.SDK_INT < 30)
+            window.decorView.systemUiVisibility =
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                    View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                    View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        root.setOnApplyWindowInsetsListener { view, insets ->
+            val bars =
+                if (android.os.Build.VERSION.SDK_INT >= 30) {
+                    val value =
+                        insets.getInsets(
+                            android.view.WindowInsets.Type.systemBars() or
+                                android.view.WindowInsets.Type.displayCutout()
+                        )
+                    android.graphics.Rect(value.left, value.top, value.right, value.bottom)
+                } else
+                    android.graphics.Rect(
+                        insets.systemWindowInsetLeft,
+                        insets.systemWindowInsetTop,
+                        insets.systemWindowInsetRight,
+                        insets.systemWindowInsetBottom,
+                    )
+            view.setPadding(bars.left, bars.top + dp(6), bars.right, bars.bottom + dp(6))
+            insets
+        }
+    }
+
     private fun createLayout() {
         root =
             column().apply {
                 setBackgroundColor(Hud.bg)
                 setPadding(0, dp(6), 0, dp(6))
             }
-        if (android.os.Build.VERSION.SDK_INT >= 30) window.setDecorFitsSystemWindows(false)
-        else
-            window.decorView.systemUiVisibility =
-                View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
-                    View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
-                    View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-        root.setOnApplyWindowInsetsListener { v, insets ->
-            v.setPadding(
-                insets.systemWindowInsetLeft,
-                insets.systemWindowInsetTop + dp(6),
-                insets.systemWindowInsetRight,
-                insets.systemWindowInsetBottom + dp(6),
-            )
-            insets
-        }
+        configureWindowInsets()
         setContentView(root)
         root.requestApplyInsets()
         val header = row().apply { setPadding(dp(20), 0, dp(20), 0) }
@@ -488,13 +513,22 @@ class MainActivity : Activity() {
             Times.format(it.time, "EEE", place.zone) to Times.format(it.time, "dd MMM", place.zone)
         }
         val datePaint = android.graphics.Paint()
-        val scale = resources.displayMetrics.scaledDensity
         datePaint.typeface = Typeface.create("monospace", Typeface.NORMAL)
         var dateWidth = dp(64)
         for ((weekday, date) in labels) {
-            datePaint.textSize = 15 * scale
+            datePaint.textSize =
+                android.util.TypedValue.applyDimension(
+                    android.util.TypedValue.COMPLEX_UNIT_SP,
+                    15f,
+                    resources.displayMetrics,
+                )
             val weekdayWidth = datePaint.measureText(weekday)
-            datePaint.textSize = 10 * scale
+            datePaint.textSize =
+                android.util.TypedValue.applyDimension(
+                    android.util.TypedValue.COMPLEX_UNIT_SP,
+                    10f,
+                    resources.displayMetrics,
+                )
             dateWidth =
                 maxOf(
                     dateWidth,
@@ -740,6 +774,7 @@ class MainActivity : Activity() {
         }
     }
 
+    @Suppress("DEPRECATION") // Required platform fallback below API 33.
     @Deprecated("Legacy Back handling for Android 7–12")
     @android.annotation.SuppressLint(
         "GestureBackNavigation"
@@ -825,6 +860,7 @@ class MainActivity : Activity() {
     private fun requestFrame(index: Int) {
         val seq = sequence ?: return
         val frame = seq.frames.getOrNull(index) ?: return
+        if (frame.file == requestedFrameFile) return
         val token = ++decodeToken
         requestedFrameFile = frame.file
         requestedFrameTime = frame.time
@@ -854,6 +890,7 @@ class MainActivity : Activity() {
         frameError = false
         updateRadarNotice()
         decoder.execute {
+            if (token != decodeToken) return@execute
             val image = BitmapFactory.decodeFile(frame.file)
             handler.post {
                 if (dead || token != decodeToken) {
@@ -906,6 +943,7 @@ class MainActivity : Activity() {
             setPlaying(false)
             showRadarDetails(false)
         }
+        if (radarVisible) repo.showRadar()
         if (value == Page.PLACES) locations()
         if (value == Page.TODAY || value == Page.WEEK) buildForecast(forecastOffsets[value] ?: 0)
     }
@@ -932,11 +970,12 @@ class MainActivity : Activity() {
         renderRadar()
     }
 
-    private fun refresh() {
-        lastRefresh = AppPlatform.now()
+    private fun refresh(force: Boolean = true) {
+        val now = AppPlatform.now()
+        lastRefresh = now
         repo.connection()
-        repo.refreshForecast()
-        repo.refreshRadar()
+        if (force || repo.forecast.needsRefresh(now, 30 * 60_000L)) repo.refreshForecast()
+        if (force || radarVisible) repo.refreshRadar()
     }
 
     private fun choose(place: Place, persist: Boolean = true): Boolean {
@@ -996,6 +1035,7 @@ class MainActivity : Activity() {
                     },
                 )
             )
+            if (place.geocodeId != null) body.addView(placeCreditView(place))
             body.space(10)
         }
         body.space(12)

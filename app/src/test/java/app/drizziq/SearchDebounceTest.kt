@@ -25,11 +25,33 @@ class SearchDebounceTest {
     }
 
     @Test
+    fun typingUsesCacheButKeyboardExplicitlyForcesRefresh() {
+        val scheduler = Scheduler()
+        val intents = mutableListOf<Pair<String, Boolean>>()
+        val debounce =
+            SearchDebounce(scheduler::schedule, {}) { query, force ->
+                intents += query to force
+            }
+        debounce.edited("Berlin")
+        scheduler.advance(400)
+        debounce.immediate("Berlin")
+        assertEquals(listOf("Berlin" to false, "Berlin" to true), intents)
+    }
+
+    @Test
     fun editing_waits400MillisecondsAndCancelsActiveWorkImmediately() {
         val scheduler = Scheduler()
         val submitted = mutableListOf<String>()
         var cancelled = 0
-        val debounce = SearchDebounce(scheduler::schedule, { cancelled++ }, submitted::add)
+        val debounce =
+            SearchDebounce(
+                scheduler::schedule,
+                { cancelled++ },
+                { query, _ ->
+                    submitted.add(query)
+                    Unit
+                },
+            )
         debounce.edited("Munich")
         assertEquals(1, cancelled)
         scheduler.advance(399)
@@ -44,7 +66,15 @@ class SearchDebounceTest {
     fun rapidEditsInvalidQueriesAndDismissal_neverPublishObsoleteSubmission() {
         val scheduler = Scheduler()
         val submitted = mutableListOf<String>()
-        val debounce = SearchDebounce(scheduler::schedule, {}, submitted::add)
+        val debounce =
+            SearchDebounce(
+                scheduler::schedule,
+                {},
+                { query, _ ->
+                    submitted.add(query)
+                    Unit
+                },
+            )
         debounce.edited("Munich")
         val obsolete = scheduler.tasks.single().action
         scheduler.advance(399)
@@ -69,7 +99,15 @@ class SearchDebounceTest {
     fun imeSearch_submitsImmediatelyWithoutDuplicateAndAllowsExplicitRetry() {
         val scheduler = Scheduler()
         val submitted = mutableListOf<String>()
-        val debounce = SearchDebounce(scheduler::schedule, {}, submitted::add)
+        val debounce =
+            SearchDebounce(
+                scheduler::schedule,
+                {},
+                { query, _ ->
+                    submitted.add(query)
+                    Unit
+                },
+            )
         debounce.edited("Munich")
         debounce.immediate("Munich")
         scheduler.advance(400)

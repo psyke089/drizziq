@@ -91,9 +91,17 @@ internal data class RadarCacheRead(
     val downloadedAt: Long = 0,
     val etag: String? = null,
     val lastModified: String? = null,
+    val latestComplete: Boolean = true,
 ) {
+    fun removeInvalid() {
+        val retained = sequence?.frames.orEmpty().map { File(it.file) }.toSet()
+        invalid.filterNot { it in retained }.forEach { it.delete() }
+    }
+
     val snapshot: RadarSnapshot?
-        get() = sequence?.let { RadarSnapshot(it, downloadedAt, etag, lastModified) }
+        get() = sequence?.let {
+            RadarSnapshot(it, downloadedAt, etag, lastModified, latestComplete)
+        }
 }
 
 /** Versioned radar manifest and frame validation shared by the cache writer and loader. */
@@ -137,69 +145,105 @@ internal object RadarCache {
             .toString()
     }
 
-    /**
-     * Returns the sequence only when version, palette, frame structure and every PNG are valid. A
-     * null sequence names files that should be removed before the next refresh regenerates.
-     */
+    /** Keep valid frames for display/reuse; incomplete latest images cannot satisfy HTTP 304. */
     fun read(directory: File): RadarCacheRead {
         val manifest = File(directory, MANIFEST)
-        if (!manifest.isFile) return RadarCacheRead(null, emptyList())
+        if (!manifest.isFile || manifest.length() > 262_144L)
+            return RadarCacheRead(null, emptyList())
         val root =
             runCatching { JSONObject(manifest.readText()) }.getOrNull()
                 ?: return RadarCacheRead(null, emptyList())
         val referenced = runCatching {
             frameNames(root)
         }
-            .getOrNull()
-            .orEmpty()
+            .getOrDefault(emptyList())
             .map { File(directory, it) }
         if (root.optInt("version", -1) != VERSION || root.optInt("palette", -1) != PALETTE_VERSION)
             return RadarCacheRead(null, referenced)
         val invalid = mutableListOf<File>()
+        var lostLatest = false
         val sequence = runCatching {
-            val frames = root.getJSONArray("frames")
-            require(frames.length() > 0)
+            val issue = root.getLong("issue")
+            require(issue >= 0 && issue <= Long.MAX_VALUE - 7_200_000 && issue % 300_000L == 0L)
+            val entries = root.getJSONArray("frames")
+            require(entries.length() in 1..37)
             val parsed =
-                (0 until frames.length()).map { index ->
-                    val frame = frames.getJSONObject(index)
-                    val name = frame.getString("file")
-                    require(isSafeName(name))
-                    val path = File(directory, name)
-                    val grid =
-                        RadarGrid(
-                            frame.getInt("w"),
-                            frame.getInt("h"),
-                            frame.getDouble("left"),
-                            frame.getDouble("top"),
-                            frame.getDouble("dx"),
-                            frame.getDouble("dy"),
-                        )
-                    val size = Png.dimensions(path)
-                    if (size != grid.width to grid.height) {
-                        invalid += path
-                        error("Invalid radar frame")
+                (0 until entries.length())
+                    .mapNotNull { index ->
+                        val entry = entries.optJSONObject(index)
+                        val name = entry?.optString("file").orEmpty()
+                        val path = File(directory, name)
+                        val frame = runCatching {
+                            require(isSafeName(name))
+                            val value = requireNotNull(entry)
+                            val time = value.getLong("time")
+                            val origin = value.getLong("issue")
+                            val lead = value.getInt("lead")
+                            require(lead in 0..120 && lead % 5 == 0)
+                            require(origin >= 0 && origin <= Long.MAX_VALUE - 7_200_000)
+                            require(time == origin + lead * 60_000L)
+                            require(
+                                (origin == issue) ||
+                                    (lead == 0 &&
+                                        origin in (issue - 3_600_000L) until issue &&
+                                        (issue - origin) % 300_000L == 0L)
+                            )
+                            val grid =
+                                RadarGrid(
+                                    value.getInt("w"),
+                                    value.getInt("h"),
+                                    value.getDouble("left"),
+                                    value.getDouble("top"),
+                                    value.getDouble("dx"),
+                                    value.getDouble("dy"),
+                                )
+                            require(grid.left.isFinite() && grid.top.isFinite())
+                            require(
+                                grid.dx.isFinite() &&
+                                    grid.dx > 0 &&
+                                    grid.dy.isFinite() &&
+                                    grid.dy > 0
+                            )
+                            require((grid.left + grid.width * grid.dx).isFinite())
+                            require((grid.top - grid.height * grid.dy).isFinite())
+                            require(Png.dimensions(path) == grid.width to grid.height)
+                            RadarFrame(time, origin, lead, grid, path.path)
+                        }
+                            .getOrNull()
+                        if (frame == null) {
+                            if (isSafeName(name)) invalid += path
+                            // Do not send validators when part of the saved representation is
+                            // missing.
+                            lostLatest = true
+                        }
+                        frame
                     }
-                    RadarFrame(
-                        frame.getLong("time"),
-                        frame.getLong("issue"),
-                        frame.getInt("lead"),
-                        grid,
-                        path.path,
-                    )
+                    .sortedBy { it.time }
+            require(parsed.isNotEmpty())
+            require(parsed.map { it.issue to it.lead }.distinct().size == parsed.size)
+            val completeHistory =
+                (1..12).all { back ->
+                    parsed.any { it.lead == 0 && it.issue == issue - back * 300_000L }
                 }
             RadarSequence(
                 parsed,
-                root.getLong("issue"),
-                root.getBoolean("historyComplete"),
+                issue,
+                root.getBoolean("historyComplete") && completeHistory && invalid.isEmpty(),
             )
         }
             .getOrNull()
+        val latestComplete =
+            !lostLatest &&
+                sequence != null &&
+                sequence.frames.any { it.issue == sequence.issue && it.lead == 0 } &&
+                sequence.frames.any { it.issue == sequence.issue && it.lead > 0 }
         return RadarCacheRead(
             sequence,
             invalid,
             root.optLong("downloadedAt", manifest.lastModified()),
-            root.optString("etag").takeIf { it.isNotEmpty() },
-            root.optString("lastModified").takeIf { it.isNotEmpty() },
+            root.optString("etag").takeIf { it.isNotEmpty() && it != "null" },
+            root.optString("lastModified").takeIf { it.isNotEmpty() && it != "null" },
+            latestComplete,
         )
     }
 
@@ -229,9 +273,6 @@ internal object RadarCache {
             ?.forEach { check(it.delete()) { "Radar cache could not be cleared" } }
     }
 
-    fun reusable(file: File, grid: RadarGrid): Boolean =
-        Png.dimensions(file)?.let { it == grid.width to grid.height } == true
-
     private fun frameNames(root: JSONObject): List<String> {
         val frames = root.getJSONArray("frames")
         return (0 until frames.length()).map { index ->
@@ -242,5 +283,5 @@ internal object RadarCache {
     }
 
     private fun isSafeName(name: String): Boolean =
-        name.isNotEmpty() && !name.startsWith(".") && File(name).name == name && '\u0000' !in name
+        Regex("rv-[0-9]{1,19}-[0-9]{1,3}\\.png").matches(name)
 }

@@ -5,6 +5,45 @@ import org.junit.Test
 
 class DataTest {
     @Test
+    fun dailyTotals_mergeEarlierHoursWithLatestWinsAndKeepGapChecks() {
+        val date = java.time.LocalDate.parse("2026-10-25")
+        val zone = "Europe/Berlin"
+        val hours =
+            hoursFor(date, zone).map {
+                it.copy(values = mapOf("RR1c" to 1.0, "SunD1" to 60.0))
+            }
+        val forecast =
+            Forecast(
+                Station("t", "t", 0.0, 0.0, null),
+                0L,
+                hours.drop(10),
+                hours.take(11).reversed().map {
+                    it.copy(values = mapOf("RR1c" to 2.0, "SunD1" to 120.0))
+                },
+            )
+        val day = forecast.days(hours.first().time, zone).single()
+        assertTrue(day.complete)
+        assertEquals(35.0, day.rain!!, 0.0)
+        assertEquals(35.0 / 60, day.sun!!, 0.00001)
+        val gap = forecast.copy(earlier = forecast.earlier.filter { it.time != hours[5].time })
+        assertNull(gap.days(hours.first().time, zone).single().rain)
+        val missing = forecast.copy(hours = forecast.hours.map { it.copy(values = emptyMap()) })
+        assertNull(missing.days(hours.first().time, zone).single().sun)
+    }
+
+    @Test
+    fun currentSummary_usesNearestValidityWithinOneHourIncludingFutureBoundary() {
+        val first = Hour(3_600_000L, emptyMap())
+        val next = Hour(7_200_000L, emptyMap())
+        val forecast = Forecast(Station("t", "t", 0.0, 0.0, null), 0L, listOf(first, next))
+        assertSame(first, forecast.current(0))
+        assertNull(forecast.current(-1))
+        assertSame(first, forecast.current(5_400_000))
+        assertSame(next, forecast.current(5_400_001))
+        assertNull(forecast.current(10_800_001))
+    }
+
+    @Test
     fun coordinatesRejectNonFiniteAndOutOfRange() {
         assertTrue(validCoordinates(-90.0, 180.0))
         assertFalse(validCoordinates(Double.NaN, 0.0))

@@ -3,9 +3,13 @@ package app.drizziq
 import android.content.Context
 
 /** CC0 tz-lookup quadtree; see AGENTS.md. Approximate at borders; user can override. */
-class ZoneLookup(context: Context) {
-    private val tree = context.assets.open("timezones.tree").bufferedReader().use { it.readText() }
-    private val zones = context.assets.open("timezones.txt").bufferedReader().use { it.readLines() }
+class ZoneLookup internal constructor(private val tree: String, private val zones: List<String>) {
+    constructor(
+        context: Context
+    ) : this(
+        context.assets.open("timezones.tree").bufferedReader().use { it.readText() },
+        context.assets.open("timezones.txt").bufferedReader().use { it.readLines() },
+    )
 
     fun at(lat: Double, lon: Double): String {
         require(validCoordinates(lat, lon))

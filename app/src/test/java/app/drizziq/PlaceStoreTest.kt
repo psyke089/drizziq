@@ -21,6 +21,15 @@ class PlaceStoreTest {
     }
 
     @Test
+    fun delete_usesTheSameCoordinateIdentityAsSave() {
+        val store = PlaceStore(Memory())
+        val home = Place("Home", 1.0, 2.0, "UTC", "open-meteo:1")
+        store.save(home)
+        assertTrue(store.delete(home.copy(label = "Renamed", geocodeId = null)))
+        assertTrue(store.favourites().isEmpty())
+    }
+
+    @Test
     fun legacyStoredPlaces_loadWithoutProvenanceOrDataMigration() {
         val memory = Memory()
         memory.data["selected"] =

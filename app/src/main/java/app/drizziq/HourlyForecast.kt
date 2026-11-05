@@ -44,6 +44,7 @@ class HourlyForecast(
     private val highlightTick =
         object : Runnable {
             override fun run() {
+                if (!isAttachedToWindow || !isShown || windowVisibility != VISIBLE) return
                 updateHighlight()
                 track.invalidate()
                 postDelayed(this, 60000L - AppPlatform.now() % 60000L)
@@ -247,9 +248,25 @@ class HourlyForecast(
         ribbon.highlighted = next
     }
 
+    private fun resumeHighlight() {
+        removeCallbacks(highlightTick)
+        if (isAttachedToWindow && isShown && windowVisibility == VISIBLE) post(highlightTick)
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (isAttachedToWindow) resumeHighlight()
+    }
+
+    override fun onVisibilityChanged(changedView: View, visibility: Int) {
+        super.onVisibilityChanged(changedView, visibility)
+        // View construction can dispatch visibility before our fields have initialized.
+        if (isAttachedToWindow) resumeHighlight()
+    }
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        highlightTick.run()
+        resumeHighlight()
     }
 
     override fun onDetachedFromWindow() {
