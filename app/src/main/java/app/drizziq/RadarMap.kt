@@ -250,6 +250,7 @@ class RadarMap(context: Context) : View(context) {
     }
 
     // GestureDetector.onSingleTapUp calls performClick; a drag/pinch must not emit a click.
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
         parent.requestDisallowInterceptTouchEvent(true)
         scale.onTouchEvent(event)
