@@ -58,6 +58,12 @@ class MainActivity : Activity() {
     private var frameError = false
     private lateinit var timeline: RadarTimeline
     private lateinit var playButton: ImageButton
+    private lateinit var radarTime: TextView
+    private lateinit var radarOverlay: FrameLayout
+    private lateinit var radarStatus: RadarStatusPanel
+    private var requestedFrameFile: String? = null
+    private var requestedFrameTime: Long? = null
+    private var radarBackCallback: android.window.OnBackInvokedCallback? = null
     private val handler = Handler(Looper.getMainLooper())
     private val decoder = Executors.newSingleThreadExecutor()
     private val frames = object : android.util.LruCache<String, Bitmap>(3) {}
@@ -651,11 +657,95 @@ class MainActivity : Activity() {
             timeline,
             LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(8) },
         )
+        radarTime =
+            label("—", 12f, Hud.ink, true).apply {
+                tag = "radar-time"
+                gravity = Gravity.CENTER
+                contentDescription = "Radar frame unavailable"
+            }
+        controls.addView(radarTime, LinearLayout.LayoutParams(dp(64), dp(40)))
         radarPanel.addView(
             controls,
             FrameLayout.LayoutParams(-1, dp(40), Gravity.BOTTOM),
         )
+        val details =
+            FrameLayout(this).apply {
+                contentDescription = "Radar details"
+                isClickable = true
+                isFocusable = true
+                background = panel(0xA60F1A28.toInt(), Hud.line, dp(24).toFloat())
+                addView(
+                    SvgIcon(this@MainActivity, "info").apply {
+                        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                    },
+                    FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER),
+                )
+                setOnClickListener {
+                    showRadarDetails(radarOverlay.visibility != View.VISIBLE)
+                }
+            }
+        radarPanel.addView(
+            details,
+            FrameLayout.LayoutParams(dp(48), dp(48), Gravity.BOTTOM or Gravity.END).apply {
+                rightMargin = dp(12)
+                bottomMargin = dp(52)
+            },
+        )
+        radarOverlay =
+            FrameLayout(this).apply {
+                visibility = View.GONE
+                setOnClickListener { showRadarDetails(false) }
+            }
+        radarStatus =
+            RadarStatusPanel(
+                this,
+                refresh = {
+                    repo.connection()
+                    repo.refreshRadar()
+                },
+                clear = {
+                    setPlaying(false)
+                    repo.clearRadarCache()
+                },
+                close = { showRadarDetails(false) },
+            )
+        val overlayScroll = ScrollView(this).apply { addView(radarStatus) }
+        radarOverlay.addView(
+            overlayScroll,
+            FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
+                leftMargin = dp(12)
+                rightMargin = dp(12)
+                bottomMargin = dp(48)
+                topMargin = dp(12)
+            },
+        )
+        radarPanel.addView(radarOverlay, FrameLayout.LayoutParams(-1, -1))
         content.addView(radarPanel, FrameLayout.LayoutParams(-1, -1))
+    }
+
+    private fun showRadarDetails(visible: Boolean) {
+        radarOverlay.visibility = if (visible) View.VISIBLE else View.GONE
+        if (visible) radarStatus.bind(repo.radar, repo.radarProgress, repo.place.zone)
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            radarBackCallback?.let { onBackInvokedDispatcher.unregisterOnBackInvokedCallback(it) }
+            radarBackCallback =
+                if (visible) android.window.OnBackInvokedCallback { showRadarDetails(false) }
+                else null
+            radarBackCallback?.let {
+                onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+                    it,
+                )
+            }
+        }
+    }
+
+    @Deprecated("Legacy Back handling for Android 7–12")
+    @android.annotation.SuppressLint(
+        "GestureBackNavigation"
+    ) // Android 13+ uses the callback above.
+    override fun onBackPressed() {
+        if (radarOverlay.isShown) showRadarDetails(false) else super.onBackPressed()
     }
 
     private fun updateRadarNotice() {
@@ -664,7 +754,11 @@ class MainActivity : Activity() {
             when {
                 frameError -> "Radar frame unavailable"
                 reading.data == null ->
-                    if (reading.state == Freshness.ERROR) "Radar unavailable" else "Loading radar…"
+                    if (reading.state == Freshness.ERROR) "Radar unavailable"
+                    else if (!reading.refreshing && repo.radarProgress.phase == RadarPhase.IDLE)
+                        "No radar cached"
+                    else "Loading radar…"
+                reading.refreshing && repo.online -> "Updating radar…"
                 !repo.online -> "Offline radar"
                 reading.state == Freshness.STALE -> "Radar data is stale or incomplete"
                 reading.state == Freshness.CACHED -> "Cached radar"
@@ -676,9 +770,14 @@ class MainActivity : Activity() {
 
     private fun updateRadarAccessibility() {
         val seq = sequence
-        val frame = seq?.frames?.getOrNull(frameIndex)
+        val frame = map.frame
+        radarTime.text = frame?.let { Times.format(it.time, "HH:mm", repo.place.zone) } ?: "—"
+        radarTime.contentDescription =
+            frame?.let {
+                "Radar ${Times.format(it.time, "EEEE dd MMM yyyy HH:mm z", repo.place.zone)}, ${if (it.lead > 0) "forecast +${it.lead} minutes" else "observation"}"
+            } ?: "Radar frame unavailable"
         timeline.contentDescription =
-            if (frame == null) "Radar timeline, waiting for frames"
+            if (frame == null || seq == null) "Radar timeline, waiting for frames"
             else {
                 val type = if (frame.lead > 0) "FORECAST +${frame.lead}m" else "OBSERVED"
                 val previous = seq.frames.getOrNull(frameIndex - 1)
@@ -694,15 +793,30 @@ class MainActivity : Activity() {
         map.online = repo.online
         map.invalidate()
         val data = reading.data
-        if (data != sequence && data != null) {
-            val oldTime = sequence?.frames?.getOrNull(frameIndex)?.time
+        if (data != sequence) {
+            val oldTime = requestedFrameTime ?: map.frame?.time
             sequence = data
-            timeline.frames = data.frames
-            frameIndex =
-                if (oldTime == null) data.frames.indexOfLast { it.lead == 0 }.coerceAtLeast(0)
-                else data.frames.indices.minBy { abs(data.frames[it].time - oldTime) }
-            requestFrame(frameIndex)
+            timeline.sequence = data
+            if (data == null) {
+                ++decodeToken
+                requestedFrameFile = null
+                requestedFrameTime = null
+                frameIndex = 0
+                frameError = false
+                setPlaying(false)
+                map.reset()
+                frames.evictAll()
+            } else {
+                frameIndex =
+                    if (oldTime == null) data.frames.indexOfLast { it.lead == 0 }.coerceAtLeast(0)
+                    else data.frames.indices.minBy { abs(data.frames[it].time - oldTime) }
+                timeline.selected = frameIndex
+                val target = data.frames[frameIndex]
+                if (target.file != map.frame?.file && target.file != requestedFrameFile)
+                    requestFrame(frameIndex)
+            }
         }
+        radarStatus.bind(reading, repo.radarProgress, repo.place.zone)
         playButton.isEnabled = data != null
         updateRadarNotice()
         updateRadarAccessibility()
@@ -712,17 +826,25 @@ class MainActivity : Activity() {
         val seq = sequence ?: return
         val frame = seq.frames.getOrNull(index) ?: return
         val token = ++decodeToken
+        requestedFrameFile = frame.file
+        requestedFrameTime = frame.time
         handler.removeCallbacks(advance)
         val display: (Bitmap) -> Unit = { image ->
             if (!dead && token == decodeToken) {
                 frameError = false
+                requestedFrameFile = null
+                requestedFrameTime = null
                 map.show(frame, image)
-                frameIndex = index
-                timeline.selected = index
+                frameIndex =
+                    sequence?.frames?.indexOfFirst { it.file == frame.file }?.coerceAtLeast(0) ?: 0
+                timeline.selected = frameIndex
                 updateRadarAccessibility()
                 updateRadarNotice()
                 if (playing && active && radarVisible)
-                    handler.postDelayed(advance, if (index == seq.frames.lastIndex) 1400 else 700)
+                    handler.postDelayed(
+                        advance,
+                        if (frameIndex == sequence?.frames?.lastIndex) 1400 else 700,
+                    )
             }
         }
         frames.get(frame.file)?.let {
@@ -734,14 +856,19 @@ class MainActivity : Activity() {
         decoder.execute {
             val image = BitmapFactory.decodeFile(frame.file)
             handler.post {
-                if (!dead) {
+                if (dead || token != decodeToken) {
+                    image?.recycle()
+                } else {
                     if (image != null) {
                         frames.put(frame.file, image)
                         display(image)
-                    } else if (token == decodeToken) {
+                    } else {
+                        requestedFrameFile = null
+                        requestedFrameTime = null
                         setPlaying(false)
                         frameError = true
                         updateRadarNotice()
+                        updateRadarAccessibility()
                     }
                 }
             }
@@ -775,7 +902,10 @@ class MainActivity : Activity() {
             }
             (tab.getChildAt(2) as TextView).setTextColor(if (selected) Hud.cyan else Hud.muted)
         }
-        if (!radarVisible) setPlaying(false)
+        if (!radarVisible) {
+            setPlaying(false)
+            showRadarDetails(false)
+        }
         if (value == Page.PLACES) locations()
         if (value == Page.TODAY || value == Page.WEEK) buildForecast(forecastOffsets[value] ?: 0)
     }
@@ -1023,6 +1153,7 @@ class MainActivity : Activity() {
     }
 
     override fun onStop() {
+        showRadarDetails(false)
         started = false
         stopped = true
         placeChoices.foreground(false)

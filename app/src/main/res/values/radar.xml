@@ -1,0 +1,9 @@
+<resources>
+    <string name="radar_last_download">Last successful download: %1$s</string>
+    <string name="radar_download">Download: %1$s</string>
+    <string name="radar_download_unchanged">Download: unchanged</string>
+    <string name="radar_bytes">%1$d KB</string>
+    <string name="radar_bytes_total">%1$s / %2$s</string>
+    <string name="radar_images">Images: %1$d / %2$s ready</string>
+    <string name="radar_history">History: %1$d / 12 checked</string>
+</resources>

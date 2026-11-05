@@ -30,6 +30,7 @@ class PhoneExercise : Instrumentation() {
             "header-weather",
             "forecast-status",
             "radar-corruption",
+            "radar-loading",
         )
     private val integrationPhases = setOf("places-integration")
     private val fullPhases = setOf("main", "persistence", "offline", "stopped-network", "restore")
@@ -1544,6 +1545,99 @@ class PhoneExercise : Instrumentation() {
                     result.putString(
                         "checks",
                         "one-finger pan; two-finger zoom in and out; double-tap zoom",
+                    )
+                }
+                "radar-loading" -> {
+                    check(fixture) { "radar-loading requires isolated fixtures" }
+                    val repo =
+                        MainActivity::class
+                            .java
+                            .getDeclaredField("repo")
+                            .apply { isAccessible = true }
+                            .get(activity) as Repository
+                    click("Radar")
+                    waitFor("initial radar settles") {
+                        repo.radar.data != null && !repo.radar.refreshing
+                    }
+                    val cached = requireNotNull(repo.radar.data)
+                    val directory = java.io.File(appContext.filesDir, "data")
+                    val receipt = repo.radar.fetched
+                    val source = cached.frames.filter { it.issue == cached.issue }
+                    RadarCache.save(
+                        directory,
+                        RadarSnapshot(
+                            cached.copy(frames = source, historyComplete = false),
+                            requireNotNull(receipt),
+                        ),
+                    )
+                    // Cached PNGs are synthetic player fixtures. Empty TAR members must be
+                    // reused by identity, without being mistaken for fresh HDF5 input.
+                    val archive = java.io.ByteArrayOutputStream()
+                    for (frame in source) {
+                        val header = ByteArray(512)
+                        val name =
+                            "composite_rv_${Times.format(frame.issue, "yyyyMMdd_HHmm")}_${frame.lead.toString().padStart(3, '0')}-hd5"
+                        name.toByteArray().copyInto(header)
+                        "00000000000".toByteArray().copyInto(header, 124)
+                        archive.write(header)
+                    }
+                    archive.write(ByteArray(1024))
+                    val gate = java.util.concurrent.CountDownLatch(1)
+                    PhoneFixtures.radarArchive = archive.toByteArray()
+                    PhoneFixtures.radarHistoryGate = gate
+                    try {
+                        click("Radar details")
+                        check(has("Last successful download:") && has("Images:") && has("History:"))
+                        click("Refresh now")
+                        waitFor("ready images while history is pending", 10000) {
+                            repo.radar.refreshing &&
+                                repo.radarProgress.phase == RadarPhase.HISTORY &&
+                                repo.radar.data?.frames?.size == 25 &&
+                                has("Images: 25 / 25 ready")
+                        }
+                        check(repo.radar.fetched == receipt) {
+                            "Partial refresh advanced the receipt time"
+                        }
+                        runOnMainSync {
+                            val time =
+                                activity.window.decorView.findViewWithTag<android.widget.TextView>(
+                                    "radar-time"
+                                )
+                            check(
+                                time.text.toString() ==
+                                    Times.format(cached.issue, "HH:mm", repo.place.zone)
+                            )
+                        }
+                        click("Clear radar cache")
+                        gate.countDown()
+                        waitFor("cache cleared after cancelled download", 10000) {
+                            !repo.radar.refreshing &&
+                                repo.radar.data == null &&
+                                has("No radar cached")
+                        }
+                        check(!java.io.File(directory, "radar.json").exists())
+                        check(directory.listFiles().orEmpty().none { it.name.startsWith("rv-") })
+                        check(
+                            directory.listFiles().orEmpty().any { it.name.startsWith("forecast-") }
+                        ) {
+                            "Clearing radar removed forecast data"
+                        }
+                        check(repo.radar.fetched == null)
+                        PhoneFixtures.radarArchive = null
+                        click("Refresh now")
+                        waitFor("explicit refresh reports its failure", 10000) {
+                            !repo.radar.refreshing && repo.radarProgress.phase == RadarPhase.FAILED
+                        }
+                        check(repo.radar.fetched == null && repo.radar.data == null)
+                        click("Close radar details")
+                    } finally {
+                        gate.countDown()
+                        PhoneFixtures.radarHistoryGate = null
+                        PhoneFixtures.radarArchive = null
+                    }
+                    result.putString(
+                        "checks",
+                        "incremental ready frames before history; selected time; live progress overlay; cache reuse before HDF decoding; clear cancels pending refresh and removes only radar; failed explicit refresh retains receipt semantics",
                     )
                 }
                 "radar" -> {

@@ -408,11 +408,14 @@ class RadarMap(context: Context) : View(context) {
 }
 
 class RadarTimeline(context: Context) : View(context) {
-    var frames: List<RadarFrame> = emptyList()
+    var sequence: RadarSequence? = null
         set(value) {
             field = value
             invalidate()
         }
+
+    private val frames: List<RadarFrame>
+        get() = sequence?.frames.orEmpty()
 
     var selected = 0
         set(value) {
@@ -430,24 +433,21 @@ class RadarTimeline(context: Context) : View(context) {
     }
 
     private fun pos(t: Long): Float {
-        if (frames.size < 2) return width / 2f
-        return context.dp(16) +
-            (width - context.dp(32)) * (t - frames.first().time).toFloat() /
-                (frames.last().time - frames.first().time)
+        return context.dp(16) + (width - context.dp(32)) * (sequence?.position(t) ?: .5f)
     }
 
     override fun onDraw(c: Canvas) {
-        if (frames.isEmpty()) return
+        val issue = sequence?.issue ?: return
         val y = height * .5f
         p.color = Hud.line
         p.strokeWidth = context.dp(2).toFloat()
-        c.drawLine(pos(frames.first().time), y, pos(frames.last().time), y, p)
+        c.drawLine(pos(issue - 3_600_000), y, pos(issue + 7_200_000), y, p)
         frames.forEachIndexed { i, f ->
             p.color = if (i <= selected) Hud.cyan else Hud.muted
             c.drawCircle(pos(f.time), y, context.dp(1).toFloat(), p)
         }
         val now = AppPlatform.now()
-        if (now in frames.first().time..frames.last().time) {
+        if (now in issue - 3_600_000..issue + 7_200_000) {
             p.color = Hud.amber
             p.strokeWidth = context.dp(1).toFloat()
             val x = pos(now)

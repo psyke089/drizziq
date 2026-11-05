@@ -31,6 +31,36 @@ class RadarCacheTest {
     }
 
     @Test
+    fun saveAndRead_preservesDownloadTimeAndHttpValidatorsWithoutUsingManifestMtime() {
+        val directory = temp.newFolder("receipts")
+        val png = frame(directory, "rv-$issue-0.png", resource("/radar-1100x1200.png"))
+        val snapshot = RadarSnapshot(sequence(png), 123_456L, "etag-v1", "old-date")
+        RadarCache.save(directory, snapshot)
+        File(directory, "radar.json").setLastModified(999_999L)
+
+        assertEquals(snapshot, RadarCache.read(directory).snapshot)
+    }
+
+    @Test
+    fun clear_removesOnlyRadarManifestImagesAndTheirTemporaryFiles() {
+        val directory = temp.newFolder("clear")
+        val radarNames =
+            listOf(
+                "radar.json",
+                "radar.json.123.part",
+                "rv-$issue-0.png",
+                "rv-$issue-0.png.123.part",
+            )
+        val retained =
+            listOf("forecast-10865.kmz", "forecast-10865.kmz.123.part", "tile.png", "places.json")
+        for (name in radarNames + retained) File(directory, name).writeText("data")
+
+        RadarCache.clear(directory)
+
+        assertEquals(retained.sorted(), directory.list()!!.sorted())
+    }
+
+    @Test
     fun encodeAndRead_validVersionedFramesRoundTrip() {
         val directory = temp.newFolder("data")
         val png = frame(directory, "rv-$issue-0.png", resource("/radar-1100x1200.png"))

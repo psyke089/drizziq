@@ -35,6 +35,71 @@ class HttpConditionalTest {
     }
 
     @Test
+    fun downloadProgressReportsActualBytesAndContentLength() {
+        val seen = mutableListOf<Pair<Long, Long?>>()
+        Http.conditional(tile, progress = { done, total -> seen += done to total }) { url ->
+            Connection(url, bytes = ByteArray(20_000), fields = mapOf("Content-Length" to "20000"))
+        }
+
+        assertEquals(0L to 20_000L, seen.first())
+        assertEquals(20_000L to 20_000L, seen.last())
+        assertTrue(seen.zipWithNext().all { (a, b) -> b.first > a.first })
+    }
+
+    @Test
+    fun firstTarEntryUsesOneRequestAndStopsBeforeOldForecasts() {
+        val url =
+            "https://opendata.dwd.de/weather/radar/composite/rv/composite_rv_20261105_1400.tar"
+        val header = ByteArray(512)
+        val name = "composite_rv_20261105_1400_000-hd5"
+        name.toByteArray().copyInto(header)
+        "00000000003".toByteArray().copyInto(header, 124)
+        val stream = ByteArrayInputStream(header + byteArrayOf(1, 2, 3) + ByteArray(800_000))
+        var requests = 0
+        var disconnected = false
+        val entry =
+            Http.firstTarEntry(url) { address ->
+                requests++
+                object : HttpURLConnection(address) {
+                    override fun connect() {}
+
+                    override fun disconnect() {
+                        disconnected = true
+                    }
+
+                    override fun usingProxy() = false
+
+                    override fun getResponseCode() = 200
+
+                    override fun getInputStream() = stream
+                }
+            }
+
+        assertEquals(1, requests)
+        assertEquals(name, entry.name)
+        assertArrayEquals(byteArrayOf(1, 2, 3), entry.bytes)
+        assertEquals(800_000, stream.available())
+        assertTrue(disconnected)
+    }
+
+    @Test
+    fun firstTarEntryRejectsForecastsOversizedAndTruncatedMembers() {
+        fun read(name: String, size: String, body: ByteArray = byteArrayOf()) {
+            val header = ByteArray(512)
+            name.toByteArray().copyInto(header)
+            size.padStart(11, '0').toByteArray().copyInto(header, 124)
+            Tar.first(ByteArrayInputStream(header + body))
+        }
+        assertThrows(IllegalArgumentException::class.java) { read("radar_005-hd5", "1") }
+        assertThrows(IllegalArgumentException::class.java) {
+            read("radar_000-hd5", 24_000_001.toString(8))
+        }
+        assertThrows(java.io.EOFException::class.java) {
+            read("radar_000-hd5", "3", byteArrayOf(1))
+        }
+    }
+
+    @Test
     fun conditionalGet_sendsBothValidatorsAndReturnsFreshMetadata() {
         lateinit var made: Connection
         val reply =

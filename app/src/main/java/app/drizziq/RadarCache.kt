@@ -85,7 +85,16 @@ internal object Png {
             (bytes[at + 3].toInt() and 0xff)
 }
 
-internal data class RadarCacheRead(val sequence: RadarSequence?, val invalid: List<File>)
+internal data class RadarCacheRead(
+    val sequence: RadarSequence?,
+    val invalid: List<File>,
+    val downloadedAt: Long = 0,
+    val etag: String? = null,
+    val lastModified: String? = null,
+) {
+    val snapshot: RadarSnapshot?
+        get() = sequence?.let { RadarSnapshot(it, downloadedAt, etag, lastModified) }
+}
 
 /** Versioned radar manifest and frame validation shared by the cache writer and loader. */
 internal object RadarCache {
@@ -93,7 +102,13 @@ internal object RadarCache {
     const val PALETTE_VERSION = 1
     private const val MANIFEST = "radar.json"
 
-    fun encode(sequence: RadarSequence, historyComplete: Boolean): String {
+    fun encode(
+        sequence: RadarSequence,
+        historyComplete: Boolean,
+        downloadedAt: Long? = null,
+        etag: String? = null,
+        lastModified: String? = null,
+    ): String {
         val frames = JSONArray()
         sequence.frames.forEach { frame ->
             frames.put(
@@ -115,6 +130,9 @@ internal object RadarCache {
             .put("palette", PALETTE_VERSION)
             .put("issue", sequence.issue)
             .put("historyComplete", historyComplete)
+            .put("downloadedAt", downloadedAt)
+            .put("etag", etag)
+            .put("lastModified", lastModified)
             .put("frames", frames)
             .toString()
     }
@@ -176,7 +194,39 @@ internal object RadarCache {
             )
         }
             .getOrNull()
-        return RadarCacheRead(sequence, invalid)
+        return RadarCacheRead(
+            sequence,
+            invalid,
+            root.optLong("downloadedAt", manifest.lastModified()),
+            root.optString("etag").takeIf { it.isNotEmpty() },
+            root.optString("lastModified").takeIf { it.isNotEmpty() },
+        )
+    }
+
+    fun save(directory: File, snapshot: RadarSnapshot) {
+        AtomicFiles.write(
+            File(directory, MANIFEST),
+            encode(
+                    snapshot.sequence,
+                    snapshot.sequence.historyComplete,
+                    snapshot.downloadedAt,
+                    snapshot.etag,
+                    snapshot.lastModified,
+                )
+                .toByteArray(),
+        )
+    }
+
+    fun clear(directory: File) {
+        directory
+            .listFiles()
+            ?.filter {
+                it.name == MANIFEST ||
+                    (it.name.startsWith("$MANIFEST.") && it.name.endsWith(".part")) ||
+                    (it.name.startsWith("rv-") &&
+                        (it.name.endsWith(".png") || it.name.endsWith(".part")))
+            }
+            ?.forEach { check(it.delete()) { "Radar cache could not be cleared" } }
     }
 
     fun reusable(file: File, grid: RadarGrid): Boolean =

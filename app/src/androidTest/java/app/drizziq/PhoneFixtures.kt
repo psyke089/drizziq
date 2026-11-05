@@ -17,6 +17,8 @@ internal object PhoneFixtures {
     private val preferences = Collections.synchronizedSet(mutableSetOf<String>())
     val unexpected = Collections.synchronizedList(mutableListOf<String>())
     val requests = AtomicInteger()
+    @Volatile var radarArchive: ByteArray? = null
+    @Volatile var radarHistoryGate: java.util.concurrent.CountDownLatch? = null
     @Volatile var forecastFailure = false
     @Volatile var forecastGate: java.util.concurrent.CountDownLatch? = null
 
@@ -46,6 +48,8 @@ internal object PhoneFixtures {
         requests.set(0)
         forecastFailure = false
         forecastGate = null
+        radarArchive = null
+        radarHistoryGate = null
         AppPlatform.clock = { now }
         AppPlatform.contexts = ::context
         AppPlatform.connected = true
@@ -82,10 +86,15 @@ internal object PhoneFixtures {
                 }
                 url.host == "opendata.dwd.de" &&
                     url.path.startsWith("/weather/radar/composite/rv/") -> {
-                    // Radar presentation is supplied by a versioned local bitmap fixture, not
-                    // public HTTP.
-                    bytes = byteArrayOf()
-                    status = 503
+                    val archive = radarArchive
+                    if (archive != null && url.path.endsWith("LATEST.tar")) {
+                        bytes = archive
+                        status = 200
+                    } else {
+                        radarHistoryGate?.await(20, java.util.concurrent.TimeUnit.SECONDS)
+                        bytes = byteArrayOf()
+                        status = 503
+                    }
                 }
                 else -> {
                     unexpected.add("${url.host}${url.path}")
@@ -103,7 +112,8 @@ internal object PhoneFixtures {
 
                 override fun getInputStream() = ByteArrayInputStream(bytes)
 
-                override fun getHeaderField(name: String?): String? = null
+                override fun getHeaderField(name: String?): String? =
+                    if (name.equals("Content-Length", true)) bytes.size.toString() else null
             }
         }
     }
@@ -131,7 +141,7 @@ internal object PhoneFixtures {
                 if (!file.isFile) frameFile.copyTo(file)
                 RadarFrame(
                     issue + step * 300000L,
-                    issue,
+                    if (step < 0) issue + step * 300000L else issue,
                     maxOf(0, step * 5),
                     decoded.grid,
                     file.path,

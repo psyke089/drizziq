@@ -126,7 +126,10 @@ data class RadarSequence(
     val frames: List<RadarFrame>,
     val issue: Long,
     val historyComplete: Boolean,
-)
+) {
+    fun position(time: Long): Float =
+        ((time - (issue - 3_600_000L)).toFloat() / 10_800_000L).coerceIn(0f, 1f)
+}
 
 /** Next timeline position, wrapping from the last frame back to the first. */
 internal fun nextRadarFrame(current: Int, size: Int): Int =
@@ -238,6 +241,17 @@ object Odim {
 /** Small bounded reader for the uncompressed tar container used by DWD. */
 object Tar {
     data class Entry(val name: String, val bytes: ByteArray)
+
+    fun first(input: InputStream): Entry {
+        val data = java.io.DataInputStream(input)
+        val header = ByteArray(512)
+        data.readFully(header)
+        val name = header.copyOfRange(0, 100).toString(Charsets.US_ASCII).trimEnd('\u0000')
+        require(header[156].toInt() in listOf(0, 48) && name.endsWith("_000-hd5")) {
+            "First radar member is not an observation"
+        }
+        return Entry(name, ByteArray(size(header)).also { data.readFully(it) })
+    }
 
     fun size(header: ByteArray): Int =
         header.copyOfRange(124, 136).toString(Charsets.US_ASCII).trim('\u0000', ' ').toInt(8).also {

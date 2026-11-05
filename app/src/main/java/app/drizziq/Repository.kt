@@ -40,9 +40,10 @@ object Http {
         limit: Int = 32000000,
         etag: String? = null,
         lastModified: String? = null,
+        progress: ((Long, Long?) -> Unit)? = null,
         open: (URL) -> HttpURLConnection = AppPlatform::open,
     ): HttpReply = downloads.track {
-        conditionalRequest(address, limit, etag, lastModified, open)
+        conditionalRequest(address, limit, etag, lastModified, progress, open)
     }
 
     private fun conditionalRequest(
@@ -50,6 +51,7 @@ object Http {
         limit: Int,
         etag: String?,
         lastModified: String?,
+        progress: ((Long, Long?) -> Unit)?,
         open: (URL) -> HttpURLConnection,
     ): HttpReply {
         var url = URL(address)
@@ -82,7 +84,7 @@ object Http {
                 }
                 require(status == 200) { "Server returned HTTP $status" }
                 return HttpReply.Ok(
-                    read(c, limit, range = null, status = status),
+                    read(c, limit, range = null, status = status, progress = progress),
                     responseEtag,
                     responseModified,
                 )
@@ -93,31 +95,55 @@ object Http {
         throw IllegalArgumentException("Too many redirects")
     }
 
-    private fun request(address: String, limit: Int, range: String?): ByteArray {
+    private fun request(address: String, limit: Int, range: String?): ByteArray =
+        get(address, range) { connection, status -> read(connection, limit, range, status) }
+
+    /** Read only the observed first member; closing the stream avoids fetching old forecasts. */
+    internal fun firstTarEntry(
+        address: String,
+        open: (URL) -> HttpURLConnection = AppPlatform::open,
+    ): Tar.Entry = downloads.track {
+        get(address, open = open) { connection, _ ->
+            val input = connection.inputStream
+            try {
+                Tar.first(input)
+            } finally {
+                // Disconnect before close: some HTTP clients drain a closed stream for reuse.
+                connection.disconnect()
+                input.close()
+            }
+        }
+    }
+
+    private fun <T> get(
+        address: String,
+        range: String? = null,
+        open: (URL) -> HttpURLConnection = AppPlatform::open,
+        consume: (HttpURLConnection, Int) -> T,
+    ): T {
         var url = URL(address)
         repeat(4) {
             checked(url)
-            val c =
-                AppPlatform.open(url).apply {
+            val connection =
+                open(url).apply {
                     connectTimeout = 15000
                     readTimeout = 20000
                     instanceFollowRedirects = false
-                    setRequestProperty(
-                        "User-Agent",
-                        USER_AGENT,
-                    )
+                    setRequestProperty("User-Agent", USER_AGENT)
                     if (range != null) setRequestProperty("Range", "bytes=$range")
                 }
             try {
-                val status = c.responseCode
+                val status = connection.responseCode
                 if (status in 300..399) {
-                    url = URL(url, c.getHeaderField("Location") ?: error("Empty redirect"))
+                    url = URL(url, connection.getHeaderField("Location") ?: error("Empty redirect"))
                     return@repeat
                 }
-                require(status == 200 || status == 206) { "Server returned HTTP $status" }
-                return read(c, limit, range, status)
+                require(status == 200 || (range != null && status == 206)) {
+                    "Server returned HTTP $status"
+                }
+                return consume(connection, status)
             } finally {
-                c.disconnect()
+                connection.disconnect()
             }
         }
         error("Too many redirects")
@@ -128,6 +154,7 @@ object Http {
         limit: Int,
         range: String?,
         status: Int,
+        progress: ((Long, Long?) -> Unit)? = null,
     ): ByteArray =
         c.inputStream.use { input ->
             // Servers may ignore Range. Select the requested bytes locally in that case.
@@ -143,6 +170,8 @@ object Http {
                     } else n += skipped
                 }
             }
+            val total = c.getHeaderField("Content-Length")?.toLongOrNull()?.takeIf { it >= 0 }
+            progress?.invoke(0, total)
             val out = ByteArrayOutputStream()
             val buffer = ByteArray(8192)
             while (length == null || out.size() < length) {
@@ -156,6 +185,7 @@ object Http {
                 if (n < 0) break
                 require(out.size() + n <= limit) { "Data response too large" }
                 out.write(buffer, 0, n)
+                progress?.invoke(out.size().toLong(), total)
             }
             if (length != null) require(out.size() == length) { "Truncated DWD response" }
             out.toByteArray()
@@ -183,6 +213,11 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
     }
     private val generation = RequestGeneration()
     private var radarBusy = false
+    private val radarWorker = Executors.newSingleThreadExecutor()
+    private val radarGeneration = RequestGeneration()
+    internal var radarProgress = RadarProgress()
+        private set
+
     var place = Place.MUNICH
         private set
 
@@ -339,36 +374,26 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
         select(place)
     }
 
+    private fun postRadar(token: Int, action: () -> Unit) {
+        post { if (radarGeneration.isCurrent(token)) action() }
+    }
+
     private fun loadRadarCache() {
         radarBusy = true
-        workers.execute {
-            runCatching {
-                val manifest = File(directory, "radar.json")
-                val time = manifest.lastModified()
-                val cached = RadarCache.read(directory)
-                cached.invalid.forEach { it.delete() }
-                val sequence =
-                    cached.sequence
-                        ?: run {
-                            manifest.delete()
-                            error("Radar cache is invalid or incompatible")
-                        }
-                Triple(sequence, time, manifest)
-            }
-                .getOrNull()
-                ?.let { (seq, time, _) ->
-                    post {
-                        radar =
-                            Reading(
-                                seq,
-                                if (online) Freshness.CACHED else Freshness.STALE,
-                                time,
-                                "Saved radar · checking DWD",
-                            )
-                        changed()
-                    }
+        val token = radarGeneration.next()
+        radarWorker.execute {
+            val saved = runCatching { RadarCache.read(directory).snapshot }.getOrNull()
+            postRadar(token) {
+                if (saved != null) {
+                    radar =
+                        Reading(
+                            saved.sequence,
+                            if (online) Freshness.CACHED else Freshness.STALE,
+                            saved.downloadedAt,
+                            "Saved radar · checking DWD",
+                        )
+                    changed()
                 }
-            post {
                 radarBusy = false
                 refreshRadar()
             }
@@ -378,6 +403,8 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
     fun refreshRadar() {
         if (radarBusy || closed.get()) return
         radarBusy = true
+        val token = radarGeneration.next()
+        radarProgress = RadarProgress(phase = RadarPhase.DOWNLOAD)
         radar =
             radar.copy(
                 state = if (radar.data == null) Freshness.LOADING else radar.state,
@@ -385,132 +412,152 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
                 message = "Receiving DWD radar",
             )
         changed()
-        workers.execute {
+        radarWorker.execute {
             try {
                 check(online) { "Offline" }
                 AtomicFiles.cleanup(directory, AppPlatform.now())
-                val frames = mutableListOf<RadarFrame>()
-                fun decode(entry: Tar.Entry): RadarFrame {
-                    val m =
-                        Regex("composite_rv_(\\d{8})_(\\d{4})_(\\d{3})-hd5").matchEntire(entry.name)
-                            ?: error("Unexpected DWD archive entry")
-                    val issue =
-                        java.text
-                            .SimpleDateFormat("yyyyMMddHHmm", java.util.Locale.US)
-                            .apply { timeZone = Times.utc }
-                            .parse(m.groupValues[1] + m.groupValues[2])!!
-                            .time
-                    val lead = m.groupValues[3].toInt()
-                    val dest = File(directory, "rv-$issue-$lead.png")
-                    val pixels = Odim.decode(entry.bytes)
-                    require(pixels.time == issue + lead * 60000L) { "DWD frame time mismatch" }
-                    if (!RadarCache.reusable(dest, pixels.grid)) {
-                        dest.delete()
-                        val bitmap =
-                            Bitmap.createBitmap(
-                                pixels.colors,
-                                pixels.grid.width,
-                                pixels.grid.height,
-                                Bitmap.Config.ARGB_8888,
-                            )
-                        try {
-                            val out = ByteArrayOutputStream()
-                            check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, out))
-                            AtomicFiles.write(dest, out.toByteArray())
-                        } finally {
-                            bitmap.recycle()
-                        }
-                    }
-                    return RadarFrame(pixels.time, issue, lead, pixels.grid, dest.path)
-                }
+                val saved = runCatching { RadarCache.read(directory).snapshot }.getOrNull()
                 val base = "${Http.WEATHER}radar/composite/rv/"
-                val archive = Http.bytes(base + "composite_rv_LATEST.tar")
-                Tar.read(archive.inputStream()) { entry ->
-                    if (entry.name.endsWith("-hd5")) frames.add(decode(entry))
-                }
-                require(frames.any { it.lead == 0 } && frames.any { it.lead > 0 }) {
-                    "DWD radar archive has no complete timeline"
-                }
-                val issue = frames.first().issue
-                require(frames.all { it.issue == issue }) { "Mixed radar issue times" }
-                var historyComplete = true
-                // Only the observed member is fetched from each preceding archive.
-                for (back in 12 downTo 1) {
-                    if (closed.get()) return@execute
-                    if (!online) {
-                        historyComplete = false
-                        break
-                    }
-                    try {
-                        val name =
-                            "composite_rv_${Times.format(issue-back*300000L,"yyyyMMdd_HHmm")}.tar"
-                        val header = Http.bytes(base + name, 512, "0-511")
-                        val length = Tar.size(header)
-                        val entryName =
-                            header.copyOfRange(0, 100).toString(Charsets.US_ASCII).trimEnd('\u0000')
-                        require(entryName.endsWith("_000-hd5"))
-                        val observed =
-                            decode(
-                                Tar.Entry(
-                                    entryName,
-                                    Http.bytes(base + name, 24000000, "512-${511+length}"),
+                val result =
+                    RadarRefresh(
+                            latest = { cached, progress ->
+                                Http.conditional(
+                                    base + "composite_rv_LATEST.tar",
+                                    etag = cached?.etag,
+                                    lastModified = cached?.lastModified,
+                                    progress = progress,
                                 )
-                            )
-                        require(observed.time == issue - back * 300000L)
-                        frames.add(observed)
-                    } catch (_: Exception) {
-                        historyComplete = false
-                    }
-                }
-                val sequence =
-                    RadarSequence(
-                        frames.sortedBy { it.time }.distinctBy { it.time },
-                        issue,
-                        historyComplete,
-                    )
-                AtomicFiles.write(
-                    File(directory, "radar.json"),
-                    RadarCache.encode(sequence, historyComplete).toByteArray(),
-                )
-                val keep = sequence.frames.map { File(it.file).name }.toSet()
+                            },
+                            observed = { issue ->
+                                check(online) { "Offline" }
+                                Http.firstTarEntry(
+                                    base +
+                                        "composite_rv_${Times.format(issue, "yyyyMMdd_HHmm")}.tar"
+                                )
+                            },
+                            decode = { entry ->
+                                val member = RadarMember.parse(entry.name)
+                                val pixels = Odim.decode(entry.bytes)
+                                require(pixels.time == member.time) { "DWD frame time mismatch" }
+                                val dest = File(directory, "rv-${member.issue}-${member.lead}.png")
+                                val bitmap =
+                                    Bitmap.createBitmap(
+                                        pixels.colors,
+                                        pixels.grid.width,
+                                        pixels.grid.height,
+                                        Bitmap.Config.ARGB_8888,
+                                    )
+                                try {
+                                    val out = ByteArrayOutputStream()
+                                    check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, out))
+                                    AtomicFiles.write(dest, out.toByteArray())
+                                } finally {
+                                    bitmap.recycle()
+                                }
+                                RadarFrame(
+                                    pixels.time,
+                                    member.issue,
+                                    member.lead,
+                                    pixels.grid,
+                                    dest.path,
+                                )
+                            },
+                            now = AppPlatform::now,
+                            running = { !closed.get() && radarGeneration.isCurrent(token) },
+                            progress = { value ->
+                                postRadar(token) {
+                                    radarProgress = value
+                                    changed()
+                                }
+                            },
+                            publish = { sequence ->
+                                postRadar(token) {
+                                    radar =
+                                        radar.copy(
+                                            data = sequence,
+                                            state =
+                                                issueFreshness(
+                                                    sequence.issue,
+                                                    AppPlatform.now(),
+                                                    RADAR_MAX_AGE,
+                                                    online,
+                                                    sequence.historyComplete,
+                                                ),
+                                            refreshing = true,
+                                        )
+                                    changed()
+                                }
+                            },
+                        )
+                        .load(saved)
+                if (!radarGeneration.isCurrent(token) || closed.get()) return@execute
+                // A cache write failure must not discard successfully received radar frames.
+                runCatching { RadarCache.save(directory, result) }
+                val keep = result.sequence.frames.map { File(it.file).name }.toSet()
                 directory
                     .listFiles()
                     ?.filter {
                         it.name.startsWith("rv-") &&
+                            it.name.endsWith(".png") &&
                             it.name !in keep &&
-                            AppPlatform.now() - it.lastModified() > 3600000
+                            AppPlatform.now() - it.lastModified() > 3_600_000
                     }
                     ?.forEach { it.delete() }
-                post {
+                postRadar(token) {
                     radarBusy = false
-                    val stale =
+                    val sequence = result.sequence
+                    val state =
                         issueFreshness(
-                            issue,
+                            sequence.issue,
                             AppPlatform.now(),
                             RADAR_MAX_AGE,
                             online,
-                            historyComplete,
-                        ) == Freshness.STALE
+                            sequence.historyComplete,
+                        )
                     radar =
                         Reading(
                             sequence,
-                            if (stale) Freshness.STALE else Freshness.LIVE,
-                            AppPlatform.now(),
+                            state,
+                            result.downloadedAt,
                             when {
-                                !historyComplete ->
+                                !sequence.historyComplete ->
                                     "Some observed frames unavailable · gaps are marked"
-                                stale -> "DWD radar issue is old or connection is offline"
+                                state == Freshness.STALE ->
+                                    "DWD radar issue is old or connection is offline"
                                 else -> null
                             },
                         )
                     changed()
                 }
-            } catch (e: Exception) {
-                post {
+            } catch (error: Exception) {
+                postRadar(token) {
                     radarBusy = false
-                    radar = radar.failed("Refresh failed · ${e.message ?: "connection error"}")
+                    radarProgress = radarProgress.copy(phase = RadarPhase.FAILED)
+                    radar = radar.failed("Refresh failed · ${error.message ?: "connection error"}")
                     changed()
                 }
+            }
+        }
+    }
+
+    fun clearRadarCache() {
+        if (closed.get() || radarProgress.phase == RadarPhase.CLEARING) return
+        val token = radarGeneration.next()
+        radarBusy = true
+        radarProgress = RadarProgress(phase = RadarPhase.CLEARING)
+        radar = radar.copy(refreshing = true, message = "Clearing radar cache")
+        changed()
+        // Serialize deletion after the cancelled worker, so it cannot recreate deleted files.
+        radarWorker.execute {
+            val error = runCatching { RadarCache.clear(directory) }.exceptionOrNull()
+            postRadar(token) {
+                radarBusy = false
+                radarProgress =
+                    RadarProgress(phase = if (error == null) RadarPhase.IDLE else RadarPhase.FAILED)
+                radar =
+                    if (error == null) Reading(message = "Radar cache cleared")
+                    else radar.failed("Radar cache could not be cleared")
+                changed()
             }
         }
     }
@@ -536,6 +583,8 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
     fun close() {
         closed.set(true)
         workers.shutdownNow()
+        radarGeneration.next()
+        radarWorker.shutdownNow()
         handler.removeCallbacksAndMessages(null)
     }
 }

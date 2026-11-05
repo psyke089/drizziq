@@ -22,7 +22,7 @@ FOCUSED_PHASES = (
 )
 # Longer checks are opt-in by name; cosmetic layout checks have been retired.
 EXTRA_PHASES = (
-    "navigation", "forecast", "radar", "places-search",
+    "navigation", "forecast", "radar", "radar-loading", "places-search",
     "viewport-save", "viewport-restore", "static-assets",
     "day-forecast", "header-weather", "fixture-forecast", "fixture-ui",
 )
