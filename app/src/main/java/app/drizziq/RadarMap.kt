@@ -1,6 +1,5 @@
 package app.drizziq
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.*
 import android.os.Handler
@@ -251,8 +250,6 @@ class RadarMap(context: Context) : View(context) {
     }
 
     // GestureDetector.onSingleTapUp calls performClick; a drag/pinch must not emit a click.
-    @SuppressLint("ClickableViewAccessibility")
-    @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
         parent.requestDisallowInterceptTouchEvent(true)
         scale.onTouchEvent(event)
