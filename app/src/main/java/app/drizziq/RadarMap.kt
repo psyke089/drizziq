@@ -201,6 +201,12 @@ class RadarMap(context: Context) : View(context) {
         viewportChanged()
     }
 
+    fun focusOnPlace() {
+        zoom = maxOf(zoom, 9.0)
+        recenter()
+        saveViewport()
+    }
+
     /**
      * Commit only at gesture/lifecycle boundaries so a force-stop cannot discard the last camera.
      */

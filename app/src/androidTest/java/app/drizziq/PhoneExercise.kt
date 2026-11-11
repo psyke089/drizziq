@@ -1710,12 +1710,19 @@ class PhoneExercise : Instrumentation() {
                             it.label?.toString() == "Recenter on selected location"
                         }
                     check(radarMapNode().performAction(recenter.id))
-                    waitFor("accessible recenter restores selected-place center", 3000) {
+                    fun centeredOnSelectedPlace(): Boolean {
+                        val description =
+                            nodes()
+                                .firstOrNull {
+                                    it.contentDescription
+                                        ?.toString()
+                                        ?.startsWith("Precipitation map") == true
+                                }
+                                ?.contentDescription
+                                ?.toString() ?: return false
                         // A Mercator round-trip may cross a six-decimal rounding midpoint.
                         // Require agreement within half of the displayed coordinate unit.
-                        val center =
-                            Regex("Center ([-0-9.]+), ([-0-9.]+);")
-                                .find(radarMapNode().contentDescription.toString())!!
+                        val center = Regex("Center ([-0-9.]+), ([-0-9.]+);").find(description)!!
                         val dy =
                             kotlin.math.abs(
                                 center.groupValues[1].toDouble() -
@@ -1723,7 +1730,49 @@ class PhoneExercise : Instrumentation() {
                             )
                         val dx =
                             kotlin.math.abs(center.groupValues[2].toDouble() - selectedPlace.lon)
-                        dy <= 0.500001e-6 && minOf(dx, 360 - dx) <= 0.500001e-6
+                        return dy <= 0.500001e-6 && minOf(dx, 360 - dx) <= 0.500001e-6
+                    }
+                    waitFor("accessible recenter restores selected-place center", 3000) {
+                        centeredOnSelectedPlace()
+                    }
+                    fun zoom() =
+                        Regex("zoom ([0-9]+(?:\\.[0-9]+)?)")
+                            .find(radarMapNode().contentDescription.toString())!!
+                            .groupValues[1]
+                            .toDouble()
+                    repeat(17) {
+                        check(
+                            radarMapNode()
+                                .performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
+                        )
+                    }
+                    click("Center and zoom on selected location")
+                    waitFor("location button centers and zooms in") {
+                        centeredOnSelectedPlace() && zoom() > 2.0
+                    }
+                    check(radarMapNode().performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD))
+                    val closerZoom = zoom()
+                    val mapBounds = Rect().apply { radarMapNode().getBoundsInScreen(this) }
+                    drag(
+                        mapBounds.centerX().toFloat(),
+                        mapBounds.centerY().toFloat(),
+                        mapBounds.centerX() + 100f,
+                        mapBounds.centerY() + 80f,
+                    )
+                    waitFor("pan away before returning to location") { !centeredOnSelectedPlace() }
+                    click("Center and zoom on selected location")
+                    waitFor("location button returns after panning") {
+                        centeredOnSelectedPlace() && zoom() == closerZoom
+                    }
+                    val saved =
+                        RadarViewport.decode(
+                            appContext
+                                .getSharedPreferences("radar-viewport", 0)
+                                .getString("camera", null),
+                            selectedPlace,
+                        )
+                    check(saved != null && kotlin.math.abs(saved.zoom - zoom()) < 0.01) {
+                        "Location button must save the focused viewport"
                     }
                     waitFor("radar sequence", 180000) {
                         nodes().any {
@@ -1770,7 +1819,7 @@ class PhoneExercise : Instrumentation() {
                     check(bar().rangeInfo.current == paused) { "Pause did not stop playback" }
                     result.putString(
                         "checks",
-                        "pan; pinch in/out; double tap; scrub to last frame; playback loops and pauses",
+                        "pan; pinch in/out; double tap; location button centers, zooms and saves; scrub to last frame; playback loops and pauses",
                     )
                 }
                 "forecast" -> {

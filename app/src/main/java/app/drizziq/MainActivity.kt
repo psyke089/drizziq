@@ -725,6 +725,23 @@ class MainActivity : Activity() {
                 bottomMargin = dp(52)
             },
         )
+        val center =
+            ImageButton(this).apply {
+                setImageResource(IconAssets.resource("location-crosshair"))
+                contentDescription = "Center and zoom on selected location"
+                if (android.os.Build.VERSION.SDK_INT >= 26)
+                    tooltipText = "Center on selected location"
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+                background = panel(0xA60F1A28.toInt(), Hud.line, dp(24).toFloat())
+                setOnClickListener { map.focusOnPlace() }
+            }
+        radarPanel.addView(
+            center,
+            FrameLayout.LayoutParams(dp(48), dp(48), Gravity.BOTTOM or Gravity.END).apply {
+                rightMargin = dp(12)
+                bottomMargin = dp(108)
+            },
+        )
         radarOverlay =
             FrameLayout(this).apply {
                 visibility = View.GONE
