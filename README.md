@@ -1,36 +1,40 @@
 <h1 align="center">Drizziq</h1>
 
-<p align="center">A dark atmospheric console for DWD weather forecasts and precipitation radar.</p>
+<p align="center">A dark weather console for one place. Forecasts and rain radar straight from the DWD — no account, no ads, no tracking.</p>
 
 <p align="center">
   <a href="https://github.com/psyke089/drizziq"><img src="docs/badges/github.svg" alt="GitHub · public repository"></a>
-  <a href="app/build.gradle.kts"><img src="docs/badges/version.svg" alt="Version 1.6.5"></a>
+  <a href="app/build.gradle.kts"><img src="docs/badges/version.svg" alt="Version 1.6.6"></a>
   <img src="docs/badges/android.svg" alt="Android 7.0+ · API 24">
   <a href="LICENSE"><img src="docs/badges/license.svg" alt="Licence MIT"></a>
 </p>
 
 <p align="center">
-  <img src="docs/screenshot.png" alt="Drizziq Today view on a OnePlus 5T, with the hourly forecast and SVG weather icons" width="280">
-  <img src="docs/screenshot-radar.png" alt="Drizziq radar details with download and image progress, cache controls and the displayed frame time" width="280">
+  <img src="docs/screenshot.png" alt="Today view with hourly forecast" width="280">
+  <img src="docs/screenshot-radar.png" alt="Radar view with timeline and playback" width="280">
 </p>
 
-Raw captures from debug builds on a OnePlus 5T / Android 13, using the
-public Munich preset. Weather data © Deutscher Wetterdienst, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Radar basemap © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright).
+<p align="center"><sub>Debug builds on a OnePlus 5T. Weather © DWD, <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a> · Map © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a></sub></p>
 
-Drizziq is a native Kotlin Android app for one selected place. It reads weather directly from Deutscher Wetterdienst open data and runs on Android 7.0+ (API 24). No accounts, ads, analytics or tracking. Location permission is optional and used only for an explicit current-location request.
+Drizziq answers one question well: what is the weather doing at *my* place, now and in the next few hours? It is a native Kotlin app for Android 7.0+, with one dark HUD, no settings maze and no cloud account. Everything it shows comes from free public data, and the app handles the unglamorous parts itself — station selection, time zones, retries, caching, offline behaviour.
 
 ## What it does
 
-- **Today.** A full-width hourly table runs from the selected place’s local midnight through noon tomorrow, including civil-time DST transitions. Temperature is colour-coded with numeric labels; precipitation, wind, gusts and optional humidity retain explicit missing values. A locally calculated sunrise/sunset card works offline.
-- **Week.** A full-width table for the coming seven days: condition, high/low, rain, maximum wind and sunshine. Earlier and latest forecast hours are combined, with latest values taking priority; daily rain/sunshine require complete local days. Today and Week share the station details and last-updated card.
-- **Radar.** Pan, zoom, recenter with the location button (which also zooms in and saves the viewport), scrub and play/pause the observation/nowcast timeline. The current image appears first; ready images fill a fixed time axis as loading continues, with the displayed time on its right. Valid cached images are reused, and unchanged DWD issues avoid another archive download. A translucent details panel shows the last successful download and separate download, image and history progress, with actions to refresh or clear only the radar cache. A single playback loop retains the last decoded image until the next is ready; stale data and historical gaps stay explicit. Satellite and temperature maps have been removed.
-- **Places.** City searches start after a 400 ms typing pause or immediately from the keyboard; keyboard Search refreshes cached results, subject to provider retry limits; selecting a result is explicit. Optional one-shot location and labelled favourites retain stored provenance. Dialogs close with their corner control, Back or outside dismissal.
-- **Header, navigation and downloads.** A taller header emphasizes current temperature, condition icon and wind to the right of a smaller, two-line location name with ellipsis for long names, shared across every view. Square Today, Week, Radar and Places tabs. A thin global progress line tracks weather, city-search and map-tile downloads in a reserved slot, so appearing/disappearing never moves the layout.
-- **Honest data states.** Forecast freshness is explicit; radar shows loading, cached, stale and error notices when needed. Failed refreshes retain timestamped successful data. Healthy automatic forecast checks run at a 30-minute download interval (missing, stale or failed data retries sooner), and radar polls every five minutes while visible; manual refresh remains immediate. The header uses the nearest forecast hour within one hour; Today highlights the containing hour. Missing DWD fields are omitted; relative humidity is normally absent from MOSMIX. Daily rain and sunshine totals require every hourly interval of a complete local day.
+- **Today.** Hourly forecast from local midnight through noon tomorrow, with colour-coded temperatures, precipitation, wind and gusts. Sun times are calculated on device and work offline.
+- **Week.** Seven days at a glance: condition, high/low, rain, maximum wind and sunshine. Earlier and newer forecast issues are merged, with the latest values winning.
+- **Radar.** Pan, zoom, scrub and play the rain radar. The newest image appears first, cached tiles show up instantly, and observations (`OBS`) are clearly separated from forecasts (`+35` min). Jump to now or slow the loop down; the timeline marks the boundary between observed and predicted rain.
+- **Places.** Search a city, pick one, optionally use your current location once. Favourites keep their provenance and survive restarts.
 
-## Build and install
+## Small print worth knowing
 
-Requires JDK 21, Android SDK platform 37, Build Tools 36.0.0 and Python 3.11+ (standard library only). Python runs `tools/verify`, the phone runner and the build-time icon generator; no third-party Python packages are needed. Open this directory in Android Studio, or set `ANDROID_HOME` to your SDK and run:
+- The app is a **station forecast**, not a smooth grid: it picks the nearest bundled DWD MOSMIX station within 50 km and shows the distance. Designed for Germany and its surroundings.
+- **Honest freshness.** A stale or failed refresh never silently replaces good data; cached data is labelled and kept. Missing DWD fields stay missing — humidity, for example, is usually not supplied.
+- **Location is optional** and used only for one explicit snapshot. Positions are resolved locally, without reverse geocoding.
+- Radar polls every five minutes only while visible; forecasts refresh on a 30-minute rhythm. Both can be forced from the UI. Only the visible map is downloaded and revalidated conditionally.
+
+## Build
+
+Needs JDK 21, Android SDK platform 37 and Build Tools 36.0.0. Python 3.11+ runs the helper scripts; no third-party packages.
 
 ```sh
 ./tools/verify --gradle-only assembleDebug
@@ -38,24 +42,26 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell am start -n app.drizziq/.MainActivity
 ```
 
-The wrapper pins Gradle 9.8.2 with a distribution checksum. Its checked-in JAR matches the upstream Gradle 9.8.2 wrapper artifact and is Apache 2.0 build tooling, not part of the APK; see [gradle/wrapper/NOTICE](gradle/wrapper/NOTICE). Android Gradle Plugin 9.4.1 supplies Kotlin support. The only application library is jHDF 0.13.0, which reads DWD's current ODIM HDF5 radar format; Android core-library desugaring supports API 24.
-
-Run the complete local development gate with:
+Or open the directory in Android Studio. The full local gate — formatting, Python tooling tests, JVM tests, lint and all three APK builds — is:
 
 ```sh
 ./tools/verify
 ```
 
-This checks Kotlin formatting, Python tooling tests, JVM unit tests, Android lint, and debug/release/device-test APK builds. The GitHub Actions workflow runs the same gate; no phone is required. See [AGENTS.md](AGENTS.md) for focused development checks, signing, phone verification and releases.
-
-The default phone runner uses isolated local fixtures and fails unexpected external requests. Use `--live` for separate provider checks, `--places-integration` for city selection and favourite persistence checks that restore the original places and map camera, and `--full` explicitly for connectivity-changing integration.
+[AGENTS.md](AGENTS.md) covers focused checks, signing, phone verification and releases. The default phone runner uses local fixtures and rejects unexpected network requests.
 
 ## Data
 
-Weather forecasts and precipitation come from `https://opendata.dwd.de/weather/`. MOSMIX is a station forecast: the app chooses the nearest bundled point within 50 km and displays its distance. DWD radar covers Germany and its surroundings. The keyless OpenStreetMap basemap has visible attribution and caches only tiles viewed on screen.
+| Source | Used for | Licence |
+|---|---|---|
+| [DWD open data](https://opendata.dwd.de/weather/) | MOSMIX forecasts, radar archives | CC BY 4.0 |
+| [OpenStreetMap](https://www.openstreetmap.org/copyright) | Radar basemap tiles | ODbL |
+| [Open-Meteo geocoding](https://open-meteo.com/en/docs/geocoding-api) / [GeoNames](https://www.geonames.org/) | City search after a 400 ms pause | CC BY 4.0 |
+| [tz-lookup](https://github.com/photostructure/tz-lookup) | Offline time-zone lookup | CC0 / ODbL |
+| [jHDF](https://github.com/jamesmudd/jhdf) | Reading ODIM HDF5 radar frames | MIT |
 
-City search sends typed search text to the free, non-commercial Open-Meteo geocoding service after a short pause, with GeoNames attribution. Device positions resolve to forecast points locally, without reverse geocoding. All app icon sources are editable SVGs in [artwork/icons](artwork/icons/README.md), compiled automatically to native Android vectors. [AGENTS.md](AGENTS.md#data-sources-and-behavior) records data sources, processing, provenance and metadata regeneration.
+All icon sources are editable SVGs in [artwork/icons](artwork/icons/README.md) and are compiled into Android vectors at build time. Full attribution and licence texts are bundled in the app and recorded in [AGENTS.md](AGENTS.md#data-sources-and-behavior).
 
 ## License
 
-[MIT](LICENSE). DWD data, OpenStreetMap data, timezone data and dependencies retain their [respective licences](app/src/main/assets/notices.txt). The public source mirror, including the bundled timezone database offered under ODbL, is [psyke089/drizziq](https://github.com/psyke089/drizziq).
+[MIT](LICENSE). Bundled data and dependencies keep their [respective licences](app/src/main/assets/notices.txt).
