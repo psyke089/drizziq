@@ -3,7 +3,7 @@
 <p align="center">A dark atmospheric console for DWD weather forecasts and precipitation radar.</p>
 
 <p align="center">
-  <a href="https://codeberg.org/k4r/drizziq"><img src="docs/badges/codeberg.svg" alt="Codeberg · private repository"></a>
+  <a href="https://github.com/psyke089/drizziq"><img src="docs/badges/github.svg" alt="GitHub · public repository"></a>
   <a href="app/build.gradle.kts"><img src="docs/badges/version.svg" alt="Version 1.6.5"></a>
   <img src="docs/badges/android.svg" alt="Android 7.0+ · API 24">
   <a href="LICENSE"><img src="docs/badges/license.svg" alt="Licence MIT"></a>

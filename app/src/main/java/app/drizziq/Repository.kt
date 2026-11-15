@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 object Http {
     val downloads = DownloadTracker()
     val USER_AGENT =
-        "Drizziq/${BuildConfig.VERSION_NAME} (Android; https://codeberg.org/k4r/drizziq)"
+        "Drizziq/${BuildConfig.VERSION_NAME} (Android; https://github.com/psyke089/drizziq)"
     const val WEATHER = "https://opendata.dwd.de/weather/"
 
     internal fun allowed(url: URL): Boolean =
