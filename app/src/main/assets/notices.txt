@@ -14,11 +14,11 @@ Weather icon artwork: created from scratch by the author for a personal todo pro
 
 Third-party components:
 - Kotlin standard library 2.2.10 and org.jetbrains annotations 13.0: Apache License 2.0, copyright JetBrains s.r.o.
-- Apache Commons Lang 3.20.0: Apache License 2.0, copyright The Apache Software Foundation.
-- compress-lzf 1.2.0: Apache License 2.0, copyright Tatu Saloranta and contributors.
-- lz4-java 1.11.1: Apache License 2.0.
-- SLF4J API 2.0.18: MIT licence, copyright QOS.ch.
-- jHDF 0.13.0: MIT licence, copyright James Mudd.
+- Apache Commons Lang 3.21.0: Apache License 2.0, copyright The Apache Software Foundation.
+- compress-lzf 1.2.1: Apache License 2.0, copyright Tatu Saloranta and contributors.
+- lz4-java 1.14.0: Apache License 2.0.
+- SLF4J API 2.0.20: MIT licence, copyright QOS.ch.
+- jHDF 0.15.0: MIT licence, copyright James Mudd.
 - Android desugar JDK libraries 2.1.5: GPL version 2 with the Classpath Exception, copyright Oracle and contributors. Corresponding source: https://github.com/google/desugar_jdk_libs (the published 2.1.5 artifact POM names this repository; no 2.1.5 source tag is published).
 
 Full licence texts follow.

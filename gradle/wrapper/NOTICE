@@ -11,9 +11,9 @@ SPDX-License-Identifier: Apache-2.0
 The complete licence text is included in the JAR under META-INF/LICENSE and in
 the header of the gradlew and gradlew.bat scripts.
 
-The checked-in JAR is the upstream Gradle 9.8.2 wrapper artifact:
-https://github.com/gradle/gradle/blob/v9.8.2/gradle/wrapper/gradle-wrapper.jar
-SHA-256: 3b8a25775a69158b5ad2b1d17a80a88dc7b40a352a73eb27d06c612a7ce68e98
+The checked-in JAR is the upstream Gradle 9.9.1 wrapper artifact:
+https://github.com/gradle/gradle/blob/v9.9.1/gradle/wrapper/gradle-wrapper.jar
+SHA-256: 621008afc4f5d59357fcf06ffa644dd5aade5e091bdc363742710445f73cdaf8
 
 The wrapper is build tooling only. It is not packaged in the application APK
 and does not add a runtime dependency.
