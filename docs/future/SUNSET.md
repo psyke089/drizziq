@@ -128,11 +128,9 @@ only if it preserves independent cameras, cache validation, visible-only tile
 requests and linked OSM attribution. Dense cards, charts and markers must fit
 the existing dark language and expose accessible text.
 
-[RADAR.md](RADAR.md) records a 1.6.4 research snapshot, not a current list of
-unfixed bugs. Re-read the implementation before borrowing map/cache code: the
-working tree already changes radar request scheduling and other behavior.
-In particular, avoid queues of obsolete work, progress callbacks that rebuild
-unrelated UI, and synchronous storage in interaction paths.
+Radar behavior lives in its implementation and tests, not in a separate
+proposal. Re-read the code before borrowing map/cache infrastructure: avoid
+queues of obsolete work and progress callbacks that rebuild unrelated UI.
 
 ## 5. Astronomy contract
 
