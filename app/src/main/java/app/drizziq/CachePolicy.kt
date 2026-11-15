@@ -94,6 +94,10 @@ internal class BoundedAccessMap<K, V>(private val capacity: Int) {
 
 /** Persisted last-access times, kept separate from source freshness timestamps. */
 internal class AccessIndex(private val file: File) {
+    private companion object {
+        const val FLUSH_MS = 5_000L
+    }
+
     private val times = mutableMapOf<String, Long>()
 
     init {
@@ -108,23 +112,37 @@ internal class AccessIndex(private val file: File) {
         }
     }
 
+    private var dirty = false
+    private var pending = 0
+    private var flushedAt = 0L
+
     @Synchronized fun last(name: String): Long? = times[name]
 
+    /** Recency is batched: a tile read must not rewrite (and fsync) the whole index. */
     @Synchronized
     fun touch(name: String, now: Long) {
         if (name.isEmpty() || '\t' in name || '\n' in name) return
         times[name] = now
-        store()
+        dirty = true
+        pending++
+        if (pending >= 64 || now - flushedAt >= FLUSH_MS) store(now)
     }
 
     @Synchronized
     fun forget(names: Collection<String>) {
         var changed = false
         names.forEach { changed = times.remove(it) != null || changed }
-        if (changed) store()
+        if (changed) {
+            dirty = true
+            store(System.currentTimeMillis())
+        }
     }
 
-    private fun store() {
+    private fun store(now: Long) {
+        if (!dirty) return
+        dirty = false
+        pending = 0
+        flushedAt = now
         runCatching {
             if (times.isEmpty()) {
                 file.delete()

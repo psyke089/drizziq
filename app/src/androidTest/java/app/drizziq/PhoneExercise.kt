@@ -1654,14 +1654,11 @@ class PhoneExercise : Instrumentation() {
                                 activity.window.decorView.findViewWithTag<android.widget.TextView>(
                                     "radar-time"
                                 )
-                            check(
-                                time.text.toString() ==
-                                    Times.format(
-                                        cached.frames.last().time,
-                                        "HH:mm",
-                                        repo.place.zone,
-                                    )
-                            )
+                            val shown = cached.frames.last()
+                            val expected =
+                                Times.format(shown.time, "HH:mm", repo.place.zone) +
+                                    if (shown.lead > 0) " +${shown.lead}" else " OBS"
+                            check(time.text.toString() == expected)
                         }
                         click("Clear radar cache")
                         gate.countDown()
@@ -1750,7 +1747,10 @@ class PhoneExercise : Instrumentation() {
                     waitFor("location button centers and zooms in") {
                         centeredOnSelectedPlace() && zoom() > 2.0
                     }
+                    val beforeForward = zoom()
                     check(radarMapNode().performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD))
+                    // The action is dispatched asynchronously; wait before reading the new zoom.
+                    waitFor("zoom step after accessibility scroll") { zoom() > beforeForward }
                     val closerZoom = zoom()
                     val mapBounds = Rect().apply { radarMapNode().getBoundsInScreen(this) }
                     drag(

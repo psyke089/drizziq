@@ -29,6 +29,12 @@ class RadarMap(context: Context) : View(context) {
     private val failed = BoundedAccessMap<String, Long>(CachePolicy.FAILED_TILE_KEYS)
     private val executor = Executors.newFixedThreadPool(3)
     private val handler = Handler(Looper.getMainLooper())
+    @Volatile private var paused = false
+    @Volatile private var viewX = .5
+    @Volatile private var viewY = .5
+    @Volatile private var viewZoom = 2.0
+    @Volatile private var viewWidth = 0
+    @Volatile private var viewHeight = 0
     private val folder = File(context.cacheDir, "tiles").apply { mkdirs() }
     private val storage by lazy {
         CacheStore(
@@ -188,6 +194,11 @@ class RadarMap(context: Context) : View(context) {
     }
 
     private fun viewportChanged() {
+        viewX = x
+        viewY = y
+        viewZoom = zoom
+        viewWidth = width
+        viewHeight = height
         val latitude = Math.toDegrees(atan(sinh(Math.PI * (1 - 2 * y))))
         contentDescription =
             "Precipitation map. Center ${String.format(java.util.Locale.US,"%.6f, %.6f",latitude,x*360-180)}; zoom ${String.format(java.util.Locale.US,"%.2f",zoom)}. Drag to pan, pinch or double tap to zoom."
@@ -208,7 +219,8 @@ class RadarMap(context: Context) : View(context) {
     }
 
     /**
-     * Commit only at gesture/lifecycle boundaries so a force-stop cannot discard the last camera.
+     * Commit at gesture and lifecycle boundaries: a force-stop has no lifecycle callback, so a
+     * deferred write would silently discard the last camera.
      */
     @android.annotation.SuppressLint("ApplySharedPref")
     fun saveViewport() {
@@ -217,6 +229,13 @@ class RadarMap(context: Context) : View(context) {
             .edit()
             .putString("camera", RadarViewport(x, y, zoom).encode(place))
             .commit()
+    }
+
+    fun flushViewport() = saveViewport()
+
+    fun setPaused(value: Boolean) {
+        paused = value
+        if (!value) invalidate()
     }
 
     fun zoomBy(amount: Double, focusX: Float = width / 2f, focusY: Float = height / 2f) {
@@ -304,33 +323,101 @@ class RadarMap(context: Context) : View(context) {
 
     private companion object {
         const val RECENTER_ACTION = 0x01000001
+        const val MAX_WAITING_TILES = 16
     }
 
     private fun request(key: String, z: Int, tx: Int, ty: Int) {
         if (
             disposed ||
+                paused ||
                 key in waiting ||
+                waiting.size >= MAX_WAITING_TILES ||
                 (failed[key]?.let { AppPlatform.now() - it < 60000 } == true)
         )
             return
         waiting.add(key)
         executor.execute {
+            if (disposed || paused || !isVisible(z, tx, ty)) {
+                handler.post { waiting.remove(key) }
+                return@execute
+            }
             val result = runCatching {
                 tileFetcher.load(
                     key,
                     "https://tile.openstreetmap.org/$z/$tx/$ty.png",
                     online,
+                    needed = { !disposed && !paused && isVisible(z, tx, ty) },
+                    onCached = { cached ->
+                        handler.post {
+                            if (!disposed && !paused) {
+                                tiles.put(key, cached)
+                                invalidate()
+                            }
+                        }
+                    },
                 )
             }
                 .getOrNull()
             handler.post {
                 if (!disposed) {
                     waiting.remove(key)
-                    if (result != null) tiles.put(key, result) else failed[key] = AppPlatform.now()
+                    if (result != null) {
+                        tiles.put(key, result)
+                    } else if (!paused) {
+                        failed[key] = AppPlatform.now()
+                    }
                     invalidate()
                 }
             }
         }
+    }
+
+    /** Bounds check without allocations; reads a snapshot, so it is safe from worker threads. */
+    private fun isVisible(z: Int, tx: Int, ty: Int): Boolean {
+        val w = viewWidth
+        val h = viewHeight
+        if (w <= 0 || h <= 0) return true
+        val count = 1 shl z
+        val size = 256.0 * 2.0.pow(viewZoom) / count
+        val left = viewX * count - w / 2 / size
+        val top = viewY * count - h / 2 / size
+        return tx >= floor(left - 1) &&
+            tx <= floor(left + w / size + 1) &&
+            ty >= floor(top - 1) &&
+            ty <= floor(top + h / size + 1)
+    }
+
+    /** Draws an already loaded coarser tile while the requested zoom level is still arriving. */
+    private fun fallback(key: String): Pair<Bitmap, Rect>? {
+        val parts = key.split('-')
+        if (parts.size != 3) return null
+        var z = parts[0].toIntOrNull() ?: return null
+        var tx = parts[1].toIntOrNull() ?: return null
+        var ty = parts[2].toIntOrNull() ?: return null
+        val childX = tx
+        val childY = ty
+        var factor = 1
+        for (step in 1..3) {
+            z -= 1
+            tx /= 2
+            ty /= 2
+            factor *= 2
+            if (z < 2) return null
+            val parent = tiles.get("$z-$tx-$ty") ?: continue
+            val w = parent.width / factor
+            val h = parent.height / factor
+            if (w <= 0 || h <= 0) continue
+            val left = (childX and (factor - 1)) * w
+            val top = (childY and (factor - 1)) * h
+            return parent to Rect(left, top, left + w, top + h)
+        }
+        return null
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        viewWidth = w
+        viewHeight = h
     }
 
     override fun onDraw(c: Canvas) {
@@ -357,18 +444,24 @@ class RadarMap(context: Context) : View(context) {
                     ((iy - top + 1) * tile + 1).toFloat(),
                 )
             }
-            if (image != null) c.drawBitmap(image, null, rect, p)
-            else {
-                p.colorFilter = null
-                p.color = Hud.panel
-                c.drawRect(rect, p)
-                p.style = Paint.Style.STROKE
-                p.color = Hud.line
-                c.drawRect(rect, p)
-                p.style = Paint.Style.FILL
-                p.colorFilter = dark
+            if (image != null) {
+                c.drawBitmap(image, null, rect, p)
+            } else {
+                val coarse = fallback(key)
+                if (coarse != null) {
+                    c.drawBitmap(coarse.first, coarse.second, rect, p)
+                } else {
+                    p.colorFilter = null
+                    p.color = Hud.panel
+                    c.drawRect(rect, p)
+                    p.style = Paint.Style.STROKE
+                    p.color = Hud.line
+                    c.drawRect(rect, p)
+                    p.style = Paint.Style.FILL
+                    p.colorFilter = dark
+                }
+                request(key, z, nx, iy)
             }
-            if (image == null) request(key, z, nx, iy)
         }
         p.colorFilter = null
         val f = frame
@@ -405,6 +498,7 @@ class RadarMap(context: Context) : View(context) {
     }
 
     fun dispose() {
+        flushViewport()
         disposed = true
         executor.shutdownNow()
         handler.removeCallbacksAndMessages(null)
@@ -448,10 +542,17 @@ class RadarTimeline(context: Context) : View(context) {
         p.color = Hud.line
         p.strokeWidth = context.dp(2).toFloat()
         c.drawLine(pos(issue - 3_600_000), y, pos(issue + 7_200_000), y, p)
+        // Boundary between the observed history and the forecast part of the timeline.
+        p.color = Hud.cyan
+        p.strokeWidth = context.dp(1).toFloat()
+        c.drawLine(pos(issue), y - context.dp(7), pos(issue), y + context.dp(7), p)
         frames.forEachIndexed { i, f ->
             p.color = if (i <= selected) Hud.cyan else Hud.muted
-            c.drawCircle(pos(f.time), y, context.dp(1).toFloat(), p)
+            p.style = if (f.lead == 0) Paint.Style.FILL else Paint.Style.STROKE
+            p.strokeWidth = context.dp(1).toFloat()
+            c.drawCircle(pos(f.time), y, context.dp(if (f.lead == 0) 2f else 1.5f).toFloat(), p)
         }
+        p.style = Paint.Style.FILL
         val now = AppPlatform.now()
         if (now in issue - 3_600_000..issue + 7_200_000) {
             p.color = Hud.amber

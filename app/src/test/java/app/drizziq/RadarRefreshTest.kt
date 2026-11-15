@@ -45,9 +45,10 @@ class RadarRefreshTest {
         val decoded = mutableListOf<Int>()
         val result =
             RadarRefresh(
-                    latest = { cached, _ ->
+                    latest = { cached, _, consume ->
                         assertNull(cached)
-                        HttpReply.Ok(archive(entry(), entry(lead = 5)), "repaired", null)
+                        consume(archive(entry(), entry(lead = 5)).inputStream())
+                        StreamReply.Ok("repaired", null)
                     },
                     observed = { error("history unavailable") },
                     decode = { value ->
@@ -69,9 +70,10 @@ class RadarRefreshTest {
         val statuses = mutableListOf<RadarProgress>()
         val result =
             RadarRefresh(
-                    latest = { _, progress ->
+                    latest = { _, progress, consume ->
                         progress(512, 2048)
-                        HttpReply.Ok(archive(entry(lead = 5), entry()), "v1", "modified")
+                        consume(archive(entry(lead = 5), entry()).inputStream())
+                        StreamReply.Ok("v1", "modified")
                     },
                     observed = { time ->
                         events += "history"
@@ -106,6 +108,29 @@ class RadarRefreshTest {
     }
 
     @Test
+    fun observationIsPublishedWhileTheArchiveIsStillBeingConsumed() {
+        val published = mutableListOf<Int>()
+        var publishedBeforeStreamFinished = false
+        val refresh =
+            RadarRefresh(
+                latest = { _, _, consume ->
+                    consume(archive(entry(), entry(lead = 5)).inputStream())
+                    publishedBeforeStreamFinished = published.isNotEmpty()
+                    StreamReply.Ok(null, null)
+                },
+                observed = { error("History must not start") },
+                decode = { RadarMember.parse(it.name).let { m -> frame(m.issue, m.lead) } },
+                now = { 200L },
+                publish = { published += it.frames.size },
+            )
+
+        refresh.load(null)
+
+        assertTrue(publishedBeforeStreamFinished)
+        assertEquals(listOf(1, 2), published.take(2))
+    }
+
+    @Test
     fun unchangedIssueReusesFramesWithoutDownloadingHistoryOrDecoding() {
         val saved =
             RadarSnapshot(
@@ -120,9 +145,9 @@ class RadarRefreshTest {
             )
         val result =
             RadarRefresh(
-                    latest = { cached, _ ->
+                    latest = { cached, _, _ ->
                         assertEquals(saved, cached)
-                        HttpReply.NotModified("etag", "modified")
+                        StreamReply.NotModified("etag", "modified")
                     },
                     observed = { error("Cached history must not be downloaded") },
                     decode = { error("Cached images must not be decoded") },
@@ -141,8 +166,9 @@ class RadarRefreshTest {
         val decoded = mutableListOf<RadarMember>()
         val result =
             RadarRefresh(
-                    latest = { _, _ ->
-                        HttpReply.Ok(archive(entry(), entry(lead = 5)), null, null)
+                    latest = { _, _, consume ->
+                        consume(archive(entry(), entry(lead = 5)).inputStream())
+                        StreamReply.Ok(null, null)
                     },
                     observed = { error("All observed history is already cached") },
                     decode = { value ->
@@ -167,8 +193,9 @@ class RadarRefreshTest {
         val published = mutableListOf<RadarSequence>()
         val result =
             RadarRefresh(
-                    latest = { _, _ ->
-                        HttpReply.Ok(archive(entry(), entry(lead = 5)), "v2", null)
+                    latest = { _, _, consume ->
+                        consume(archive(entry(), entry(lead = 5)).inputStream())
+                        StreamReply.Ok("v2", null)
                     },
                     observed = { error("Unnecessary history request") },
                     decode = { error("Unnecessary raster decode") },
@@ -189,8 +216,9 @@ class RadarRefreshTest {
     fun historyFailuresLeaveGapsAndOtherObservationsStillArrive() {
         val result =
             RadarRefresh(
-                    latest = { _, _ ->
-                        HttpReply.Ok(archive(entry(), entry(lead = 5)), null, null)
+                    latest = { _, _, consume ->
+                        consume(archive(entry(), entry(lead = 5)).inputStream())
+                        StreamReply.Ok(null, null)
                     },
                     observed = { time ->
                         if (time == issue - 300_000) error("Missing archive") else entry(time)
@@ -212,7 +240,7 @@ class RadarRefreshTest {
         var requests = 0
         val result =
             RadarRefresh(
-                    latest = { _, _ -> HttpReply.NotModified(null, null) },
+                    latest = { _, _, _ -> StreamReply.NotModified(null, null) },
                     observed = {
                         requests++
                         entry(it)
@@ -233,7 +261,10 @@ class RadarRefreshTest {
         val seen = mutableListOf<RadarSequence>()
         val refresh =
             RadarRefresh(
-                latest = { _, _ -> HttpReply.Ok(archive(entry(), entry(lead = 5)), null, null) },
+                latest = { _, _, consume ->
+                    consume(archive(entry(), entry(lead = 5)).inputStream())
+                    StreamReply.Ok(null, null)
+                },
                 observed = { error("Cancelled work must not download history") },
                 decode = { RadarMember.parse(it.name).let { frame(it.issue, it.lead) } },
                 now = { 200L },
@@ -258,7 +289,10 @@ class RadarRefreshTest {
         val seen = mutableListOf<RadarSequence>()
         val refresh =
             RadarRefresh(
-                latest = { _, _ -> HttpReply.Ok(archive(entry(), entry(lead = 5)), null, null) },
+                latest = { _, _, consume ->
+                    consume(archive(entry(), entry(lead = 5)).inputStream())
+                    StreamReply.Ok(null, null)
+                },
                 observed = { error("History must not start") },
                 decode = { error("Bad HDF5") },
                 now = { error("Failed processing is not a successful download") },

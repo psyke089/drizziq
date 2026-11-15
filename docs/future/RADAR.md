@@ -1,9 +1,38 @@
 # Radar: Verbesserungen, Datenquellen und technische Bestandsaufnahme
 
 Recherche vom **2026-11-05**, bezogen auf Drizziq **1.6.4**, Commit `2af89b3`.
-Dieses Dokument beschreibt Vorschläge und Befunde, keine bereits umgesetzten
-Funktionen. Die Recherche und ihre Dokumentation ändern keinen Anwendungscode
-und integrieren keine neuen Dienste.
+Dieses Dokument beschreibt Vorschläge und Befunde; der Umsetzungsstand unten
+ist nachgetragen. Die Recherche und ihre Dokumentation ändern keinen
+Anwendungscode und integrieren keine neuen Dienste.
+
+## 0. Umsetzungsstand 2026-11-15
+
+Die Befunde aus §3 und §4 sind umgesetzt, die Bedienlücken aus §5 teilweise:
+
+- Decode-Anfragen werden zusammengefasst und vor dem Decode auf Aktualität
+  geprüft; Downloadfortschritt wird auf höchstens vier Updates pro Sekunde
+  gebündelt.
+- Gespeicherte Kacheln erscheinen sofort, die bedingte Revalidierung folgt im
+  Hintergrund. Nur sichtbare Kacheln werden angefragt, höchstens 16 warten
+  gleichzeitig, und gröbere Zoomstufen dienen als Platzhalter.
+- Der aktuelle TAR-Lauf wird während des Downloads gelesen; die aktuelle
+  Beobachtung wird vor dem Rest des Archivs veröffentlicht, danach folgt die
+  Historie.
+- Frisch dekodierte Bitmaps gehen direkt an die Anzeige; das PNG bleibt nur
+  Persistenz für spätere Starts.
+- Das Viewport bleibt am Gestenende synchron gespeichert: ein Force-Stop hat
+  keinen Lifecycle-Callback, ein verzögertes Schreiben würde die letzte Kamera
+  verlieren. Zusätzliche Schreibvorgänge pro Frame wurden vermieden.
+- Radar-Dateien werden erst nach erfolgreichem Manifest-Schreiben bereinigt;
+  referenzierte Frames bleiben immer erhalten.
+- Der Access-Index wird gebündelt statt pro Kachel-Lesung geschrieben.
+- Laufende Radararbeit wird bei `onStop` abgebrochen; gespeicherte Frames
+  bleiben unverändert.
+- Die Radar-UI kennzeichnet Beobachtungen und Prognosen sichtbar, markiert die
+  Grenze auf der Zeitachse und bietet einen Jetzt-Sprung sowie 0,5×/1×/2×.
+
+Offen bleiben die Datenquellen und Funktionen aus §5 (CAP, HymecNG, KONRAD3D,
+RADOLAN/HX, Ortskurve, Farblegende); §6 und §7 bleiben Vorschläge.
 
 ## 1. Empfehlung und Untersuchungsgrenzen
 

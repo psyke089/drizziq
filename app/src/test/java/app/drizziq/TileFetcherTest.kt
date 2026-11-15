@@ -263,6 +263,50 @@ class TileFetcherTest {
     }
 
     @Test
+    fun staleTileIsHandedToTheViewBeforeRevalidationFinishes() {
+        val folder = folder()
+        tile(folder)
+        receipt(folder, checkedAt = now - CachePolicy.TILE_FRESH_MS - 1)
+        val events = mutableListOf<String>()
+        val fetch =
+            FakeFetch().apply {
+                reply = {
+                    events += "fetch"
+                    HttpReply.NotModified("\"v1\"", null)
+                }
+            }
+
+        val image =
+            loader(folder, fetch = fetch.fetch)
+                .load(key, address, onCached = { events += "cached" })
+
+        assertArrayEquals(good, image)
+        assertEquals(listOf("cached", "fetch"), events)
+    }
+
+    @Test
+    fun unneededTileSkipsRevalidationButStillReturnsTheCachedImage() {
+        val folder = folder()
+        tile(folder)
+        receipt(folder, checkedAt = now - CachePolicy.TILE_FRESH_MS - 1)
+        val fetch = FakeFetch().apply { reply = { HttpReply.Ok(good, "\"new\"", null) } }
+
+        val image = loader(folder, fetch = fetch.fetch).load(key, address, needed = { false })
+
+        assertArrayEquals(good, image)
+        assertTrue(fetch.calls.isEmpty())
+    }
+
+    @Test
+    fun missingUnneededTileDoesNotStartADownload() {
+        val folder = folder()
+        val fetch = FakeFetch().apply { reply = { HttpReply.Ok(good, "\"new\"", null) } }
+
+        assertNull(loader(folder, fetch = fetch.fetch).load(key, address, needed = { false }))
+        assertTrue(fetch.calls.isEmpty())
+    }
+
+    @Test
     fun offline_usesTheStaleCachedTileWithoutARequest() {
         val folder = folder()
         tile(folder)

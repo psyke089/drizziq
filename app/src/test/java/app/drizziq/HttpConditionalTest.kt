@@ -47,6 +47,50 @@ class HttpConditionalTest {
     }
 
     @Test
+    fun conditionalStreamConsumesTheBodyAndReturnsValidators() {
+        val seen = mutableListOf<Pair<Long, Long?>>()
+        val bytes = ByteArray(200_000)
+        val reply =
+            Http.conditionalStream(
+                tile,
+                progress = { done, total -> seen += done to total },
+                open = { url ->
+                    Connection(
+                        url,
+                        bytes = bytes,
+                        fields = mapOf("Content-Length" to "200000", "ETag" to "\"v1\""),
+                    )
+                },
+            ) { input ->
+                var count = 0
+                while (input.read() >= 0) count++
+                assertEquals(bytes.size, count)
+            }
+
+        assertTrue(reply is StreamReply.Ok)
+        assertEquals("\"v1\"", (reply as StreamReply.Ok).etag)
+        assertEquals(0L to 200_000L, seen.first())
+        assertEquals(200_000L to 200_000L, seen.last())
+    }
+
+    @Test
+    fun conditionalStreamReturnsNotModifiedWithoutReadingABody() {
+        val reply =
+            Http.conditionalStream(
+                tile,
+                etag = "\"v1\"",
+                open = { url ->
+                    Connection(url, code = 304)
+                },
+            ) {
+                error("A 304 must not consume a body")
+            }
+
+        assertTrue(reply is StreamReply.NotModified)
+        assertEquals("\"v1\"", (reply as StreamReply.NotModified).etag)
+    }
+
+    @Test
     fun firstTarEntryUsesOneRequestAndStopsBeforeOldForecasts() {
         val url =
             "https://opendata.dwd.de/weather/radar/composite/rv/composite_rv_20261105_1400.tar"

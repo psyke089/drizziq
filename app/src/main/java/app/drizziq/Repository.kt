@@ -94,6 +94,91 @@ object Http {
         throw IllegalArgumentException("Too many redirects")
     }
 
+    /**
+     * Conditional GET that hands the body to [consume] while it is still arriving, so a caller can
+     * act on early entries without buffering the whole response.
+     */
+    internal fun conditionalStream(
+        address: String,
+        limit: Int = 32000000,
+        etag: String? = null,
+        lastModified: String? = null,
+        progress: ((Long, Long?) -> Unit)? = null,
+        open: (URL) -> HttpURLConnection = AppPlatform::open,
+        consume: (InputStream) -> Unit,
+    ): StreamReply = downloads.track {
+        var url = URL(address)
+        repeat(4) {
+            checked(url)
+            val c =
+                open(url).apply {
+                    connectTimeout = 15000
+                    readTimeout = 20000
+                    instanceFollowRedirects = false
+                    setRequestProperty("User-Agent", USER_AGENT)
+                    if (!etag.isNullOrEmpty()) setRequestProperty("If-None-Match", etag)
+                    if (!lastModified.isNullOrEmpty()) {
+                        setRequestProperty("If-Modified-Since", lastModified)
+                    }
+                }
+            try {
+                val status = c.responseCode
+                val responseEtag = c.getHeaderField("ETag")?.takeIf { it.isNotEmpty() }
+                val responseModified = c.getHeaderField("Last-Modified")?.takeIf { it.isNotEmpty() }
+                if (status == 304) {
+                    return@track StreamReply.NotModified(
+                        responseEtag ?: etag,
+                        responseModified ?: lastModified,
+                    )
+                }
+                if (status in 300..399) {
+                    url = URL(url, c.getHeaderField("Location") ?: error("Empty redirect"))
+                    return@repeat
+                }
+                require(status == 200) { "Server returned HTTP $status" }
+                val total = c.getHeaderField("Content-Length")?.toLongOrNull()?.takeIf { it >= 0 }
+                progress?.invoke(0, total)
+                val body = LimitedStream(c.inputStream, limit.toLong(), total, progress)
+                try {
+                    consume(body)
+                } finally {
+                    body.close()
+                }
+                progress?.invoke(body.count, total)
+                return@track StreamReply.Ok(responseEtag, responseModified)
+            } finally {
+                c.disconnect()
+            }
+        }
+        throw IllegalArgumentException("Too many redirects")
+    }
+
+    private class LimitedStream(
+        input: InputStream,
+        private val limit: Long,
+        private val total: Long?,
+        private val progress: ((Long, Long?) -> Unit)?,
+    ) : FilterInputStream(input) {
+        var count = 0L
+            private set
+
+        private var reported = 0L
+
+        override fun read(): Int = super.read().also { if (it >= 0) advance(1) }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int =
+            super.read(b, off, len).also { if (it > 0) advance(it) }
+
+        private fun advance(bytes: Int) {
+            count += bytes
+            require(count <= limit) { "Data response too large" }
+            if (count - reported >= 65536 || (total != null && count == total)) {
+                reported = count
+                progress?.invoke(count, total)
+            }
+        }
+    }
+
     private fun request(address: String, limit: Int): ByteArray =
         get(address) { connection -> read(connection, limit) }
 
@@ -174,6 +259,13 @@ internal sealed class HttpReply {
     class NotModified(val etag: String?, val lastModified: String?) : HttpReply()
 }
 
+/** Result of [Http.conditionalStream]; the body was consumed before this value was produced. */
+internal sealed class StreamReply {
+    class Ok(val etag: String?, val lastModified: String?) : StreamReply()
+
+    class NotModified(val etag: String?, val lastModified: String?) : StreamReply()
+}
+
 class Repository(private val context: Context, private val changed: () -> Unit) {
     private val handler = Handler(Looper.getMainLooper())
     private val workers = Executors.newFixedThreadPool(2)
@@ -190,6 +282,7 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
     private var radarBusy = false
     private val radarWorker = Executors.newSingleThreadExecutor()
     private val radarGeneration = RequestGeneration()
+    private val frameBitmaps = LinkedHashMap<String, Bitmap>()
     internal var radarProgress = RadarProgress()
         private set
 
@@ -226,6 +319,20 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
 
     private fun post(action: () -> Unit) {
         handler.post { if (!closed.get()) action() }
+    }
+
+    /**
+     * Hands the bitmap produced for a frame to the UI so the PNG is not decoded a second time.
+     * Evicted entries are only dropped: the view may still be drawing that bitmap.
+     */
+    fun takeRadarBitmap(path: String): Bitmap? =
+        synchronized(frameBitmaps) { frameBitmaps.remove(path) }
+
+    private fun keepBitmap(path: String, bitmap: Bitmap) {
+        synchronized(frameBitmaps) {
+            frameBitmaps[path] = bitmap
+            while (frameBitmaps.size > 3) frameBitmaps.remove(frameBitmaps.keys.first())
+        }
     }
 
     fun connection(): Boolean {
@@ -391,6 +498,19 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
         }
     }
 
+    /**
+     * Cancels in-flight radar work when the window stops without touching saved frames; opening the
+     * radar again starts a fresh refresh.
+     */
+    fun pauseRadar() {
+        if (!radarBusy) return
+        radarGeneration.next()
+        radarBusy = false
+        radarProgress = radarProgress.copy(phase = RadarPhase.IDLE)
+        radar = radar.copy(refreshing = false)
+        changed()
+    }
+
     fun refreshRadar() {
         if (radarBusy || closed.get()) return
         radarBusy = true
@@ -409,14 +529,17 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
                 AtomicFiles.cleanup(directory, AppPlatform.now())
                 val saved = runCatching { readRadarCache() }.getOrNull()
                 val base = "${Http.WEATHER}radar/composite/rv/"
+                var lastProgressPhase: RadarPhase? = null
+                var lastProgressPost = 0L
                 val result =
                     RadarRefresh(
-                            latest = { cached, progress ->
-                                Http.conditional(
+                            latest = { cached, progress, consume ->
+                                Http.conditionalStream(
                                     base + "composite_rv_LATEST.tar",
                                     etag = cached?.etag,
                                     lastModified = cached?.lastModified,
                                     progress = progress,
+                                    consume = consume,
                                 )
                             },
                             observed = { issue ->
@@ -442,9 +565,11 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
                                     val out = ByteArrayOutputStream()
                                     check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, out))
                                     AtomicFiles.write(dest, out.toByteArray())
-                                } finally {
+                                } catch (error: Exception) {
                                     bitmap.recycle()
+                                    throw error
                                 }
+                                keepBitmap(dest.path, bitmap)
                                 RadarFrame(
                                     pixels.time,
                                     member.issue,
@@ -456,9 +581,17 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
                             now = AppPlatform::now,
                             running = { !closed.get() && radarGeneration.isCurrent(token) },
                             progress = { value ->
-                                postRadar(token) {
-                                    radarProgress = value
-                                    changed()
+                                val at = AppPlatform.now()
+                                val urgent =
+                                    value.phase != lastProgressPhase ||
+                                        value.phase != RadarPhase.DOWNLOAD
+                                if (urgent || at - lastProgressPost >= 250) {
+                                    lastProgressPhase = value.phase
+                                    lastProgressPost = at
+                                    postRadar(token) {
+                                        radarProgress = value
+                                        changed()
+                                    }
                                 }
                             },
                             publish = { sequence ->
@@ -482,18 +615,13 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
                         )
                         .load(saved)
                 if (!radarGeneration.isCurrent(token) || closed.get()) return@execute
-                // A cache write failure must not discard successfully received radar frames.
-                runCatching { RadarCache.save(directory, result) }
-                val keep = result.sequence.frames.map { File(it.file).name }.toSet()
-                directory
-                    .listFiles()
-                    ?.filter {
-                        it.name.startsWith("rv-") &&
-                            it.name.endsWith(".png") &&
-                            it.name !in keep &&
-                            AppPlatform.now() - it.lastModified() > 3_600_000
-                    }
-                    ?.forEach { it.delete() }
+                // A cache write failure must not discard successfully received radar frames, and
+                // pruning must wait until the manifest that references them is safely replaced.
+                val manifest = runCatching { RadarCache.save(directory, result) }
+                if (manifest.isSuccess) {
+                    val keep = result.sequence.frames.map { File(it.file).name }.toSet()
+                    runCatching { RadarCache.prune(directory, keep) }
+                }
                 postRadar(token) {
                     radarBusy = false
                     val sequence = result.sequence
@@ -573,6 +701,7 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
 
     fun close() {
         closed.set(true)
+        synchronized(frameBitmaps) { frameBitmaps.clear() }
         workers.shutdownNow()
         radarGeneration.next()
         radarWorker.shutdownNow()

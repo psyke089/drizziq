@@ -47,11 +47,11 @@ class CacheStoreTest {
         val oldestReceipt = file(directory, "b.kmz", 30, now - 10 * day)
         val middleReceipt = file(directory, "c.kmz", 30, now - 5 * day)
         val access = store(directory, 64L)
-        now = 100
+        now = 6_000
         access.read(newestReceipt)
-        now = 200
+        now = 12_000
         access.read(oldestReceipt)
-        now = 300
+        now = 18_000
         access.read(middleReceipt)
 
         store(directory, 60L).prune()

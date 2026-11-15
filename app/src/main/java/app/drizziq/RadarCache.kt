@@ -261,6 +261,21 @@ internal object RadarCache {
         )
     }
 
+    /**
+     * Removes frames the saved sequence no longer references, bounding the cache to one sequence.
+     * Referenced frames are never deleted: that would break the manifest. Call only after a
+     * successful manifest write.
+     */
+    fun prune(directory: File, keep: Set<String>) {
+        directory
+            .listFiles()
+            ?.filter {
+                it.isFile && it.name.startsWith("rv-") && it.name.endsWith(".png")
+            }
+            ?.filter { it.name !in keep }
+            ?.forEach { it.delete() }
+    }
+
     fun clear(directory: File) {
         directory
             .listFiles()

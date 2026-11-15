@@ -280,6 +280,18 @@ class RadarCacheTest {
         assertNull(RadarCache.read(directory).sequence)
     }
 
+    @Test
+    fun prune_deletesOnlyFramesTheCurrentManifestDoesNotReference() {
+        val directory = temp.newFolder("prune")
+        val kept = frame(directory, "rv-$issue-0.png", resource("/radar-1100x1200.png"))
+        val orphan = frame(directory, "rv-${issue - 86_400_000}-0.png", "stale".toByteArray())
+
+        RadarCache.prune(directory, setOf(kept.name))
+
+        assertTrue(kept.isFile)
+        assertFalse(orphan.exists())
+    }
+
     private fun file(directory: File, name: String, bytes: ByteArray): File =
         File(directory, name).apply { writeBytes(bytes) }
 }

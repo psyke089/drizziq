@@ -1,5 +1,6 @@
 package app.drizziq
 
+import java.io.InputStream
 import java.util.concurrent.CancellationException
 
 internal enum class RadarPhase {
@@ -52,10 +53,12 @@ internal data class RadarMember(val issue: Long, val lead: Int) {
 }
 
 /**
- * Downloads and publishes ready frames, preserving their source issue rather than just validity.
+ * Streams the latest archive, publishing each decoded frame as soon as it arrives, then fills the
+ * observed history. Frame issue times are preserved rather than just validity.
  */
 internal class RadarRefresh(
-    private val latest: (RadarSnapshot?, (Long, Long?) -> Unit) -> HttpReply,
+    private val latest:
+        (RadarSnapshot?, (Long, Long?) -> Unit, (InputStream) -> Unit) -> StreamReply,
     private val observed: (Long) -> Tar.Entry,
     private val decode: (Tar.Entry) -> RadarFrame,
     private val now: () -> Long,
@@ -73,12 +76,6 @@ internal class RadarRefresh(
             if (!running()) throw CancellationException("Radar refresh cancelled")
         }
         report(status)
-        val reply =
-            latest(cached?.takeIf { it.latestComplete }) { bytes, total ->
-                checkRunning()
-                report(status.copy(bytes = bytes, totalBytes = total))
-            }
-        checkRunning()
         val reusable =
             cached?.sequence?.frames.orEmpty().associateBy { RadarMember(it.issue, it.lead) }
         fun frame(entry: Tar.Entry): RadarFrame {
@@ -114,46 +111,70 @@ internal class RadarRefresh(
                 )
             )
         }
-        val issue: Long
-        val downloadedAt: Long
-        val etag: String?
-        val modified: String?
+        var issue = -1L
+        var downloadedAt = 0L
+        var etag: String? = null
+        var modified: String? = null
+        val seen = mutableSetOf<RadarMember>()
+        val deferred = mutableListOf<Tar.Entry>()
+        var sawObservation = false
+        var processed = 0
+        val reply =
+            latest(
+                cached?.takeIf { it.latestComplete },
+                { bytes, total ->
+                    checkRunning()
+                    report(status.copy(bytes = bytes, totalBytes = total))
+                },
+                { input ->
+                    Tar.read(input) { entry ->
+                        checkRunning()
+                        val member = RadarMember.parse(entry.name)
+                        if (issue < 0) issue = member.issue
+                        require(member.issue == issue) { "Mixed radar issue times" }
+                        require(seen.add(member)) { "Duplicate radar members" }
+                        if (member.lead == 0) {
+                            sawObservation = true
+                            frames += frame(entry)
+                            processed++
+                            publishReady(issue)
+                            for (waiting in deferred) {
+                                frames += frame(waiting)
+                                processed++
+                            }
+                            if (deferred.isNotEmpty()) publishReady(issue)
+                            deferred.clear()
+                        } else if (!sawObservation) {
+                            // Keep the observation first even if the archive lists forecasts first.
+                            deferred += entry
+                        } else {
+                            frames += frame(entry)
+                            processed++
+                            publishReady(issue)
+                        }
+                        report(status.copy(phase = RadarPhase.PROCESSING, processed = processed))
+                    }
+                },
+            )
+        checkRunning()
         when (reply) {
-            is HttpReply.Ok -> {
-                val entries = mutableListOf<Tar.Entry>()
-                Tar.read(reply.bytes.inputStream()) { if (it.name.endsWith("-hd5")) entries += it }
-                val members = entries.map { RadarMember.parse(it.name) }
-                require(members.any { it.lead == 0 } && members.any { it.lead > 0 }) {
-                    "DWD radar archive has no complete timeline"
+            is StreamReply.Ok -> {
+                require(sawObservation && deferred.isEmpty()) {
+                    "DWD radar archive has no observation"
                 }
-                issue = members.first().issue
-                require(
-                    members.all { it.issue == issue } && members.distinct().size == members.size
-                ) {
-                    "Mixed or duplicate radar issue times"
-                }
-                var ready = members.count { reusable[it]?.time == it.time }
-                report(
-                    status.copy(
-                        phase = RadarPhase.PROCESSING,
-                        bytes = reply.bytes.size.toLong(),
-                        totalBytes = reply.bytes.size.toLong(),
-                        totalFrames = entries.size,
-                        processed = ready,
-                    )
-                )
-                for (entry in entries.sortedBy { RadarMember.parse(it.name).lead }) {
-                    val member = RadarMember.parse(entry.name)
-                    frames += frame(entry)
-                    if (reusable[member]?.time != member.time) ready++
-                    publishReady(issue)
-                    report(status.copy(processed = ready))
-                }
+                require(frames.any { it.lead > 0 }) { "DWD radar archive has no forecast" }
                 downloadedAt = now()
                 etag = reply.etag
                 modified = reply.lastModified
+                report(
+                    status.copy(
+                        phase = RadarPhase.PROCESSING,
+                        processed = processed,
+                        totalFrames = processed,
+                    )
+                )
             }
-            is HttpReply.NotModified -> {
+            is StreamReply.NotModified -> {
                 val saved = requireNotNull(cached) { "DWD returned 304 without cached radar" }
                 require(saved.latestComplete) { "DWD returned 304 for incomplete cached radar" }
                 issue = saved.sequence.issue

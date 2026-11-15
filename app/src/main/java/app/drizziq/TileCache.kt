@@ -135,16 +135,31 @@ internal class TileFetcher<T>(
         receipts.pruneMissing(folder)
     }
 
-    fun load(key: String, address: String, online: Boolean = true): T? {
+    /**
+     * Returns the cached tile immediately (also through [onCached]) and only then revalidates it.
+     * [needed] is re-checked before any request so a paused or scrolled-away viewport does not
+     * spend bandwidth on tiles it no longer shows.
+     */
+    fun load(
+        key: String,
+        address: String,
+        online: Boolean = true,
+        needed: () -> Boolean = { true },
+        onCached: ((T) -> Unit)? = null,
+    ): T? {
         val file = File(folder, "$key.png")
         val image = file.takeIf { it.isFile }?.let { runCatching { decodeFile(it) }.getOrNull() }
-        if (image != null) onRead(file)
+        if (image != null) {
+            onRead(file)
+            onCached?.invoke(image)
+        }
         if (!online) return image
 
         val now = clock()
         val stored = receipts.get(key)
         val checkedAt = stored?.checkedAt ?: file.lastModified()
         if (image != null && now - checkedAt <= CachePolicy.TILE_FRESH_MS) return image
+        if (!needed()) return image
 
         var etag = stored?.etag
         var modified = stored?.lastModified

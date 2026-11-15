@@ -79,6 +79,8 @@ class MainActivity : Activity() {
     private var frameIndex = 0
     @Volatile private var decodeToken = 0
     private var playing = false
+    private var playbackSpeed = 1.0
+    private lateinit var speedButton: TextView
     private var active = false
     private var started = false
     private var stopped = false
@@ -680,6 +682,23 @@ class MainActivity : Activity() {
                 setOnClickListener { setPlaying(!playing) }
             }
         controls.addView(playButton, LinearLayout.LayoutParams(dp(48), dp(40)))
+        controls.addView(
+            label("NOW", 10f, Hud.cyan, true).apply {
+                tag = "radar-now"
+                gravity = Gravity.CENTER
+                contentDescription = "Jump to the current radar observation"
+                setOnClickListener {
+                    setPlaying(false)
+                    val data = sequence?.frames ?: return@setOnClickListener
+                    val index =
+                        data.indices.minByOrNull {
+                            abs(data[it].time - AppPlatform.now())
+                        } ?: return@setOnClickListener
+                    requestFrame(index)
+                }
+            },
+            LinearLayout.LayoutParams(dp(48), dp(40)),
+        )
         timeline =
             RadarTimeline(this).apply {
                 onSelect = {
@@ -697,7 +716,28 @@ class MainActivity : Activity() {
                 gravity = Gravity.CENTER
                 contentDescription = "Radar frame unavailable"
             }
-        controls.addView(radarTime, LinearLayout.LayoutParams(dp(64), dp(40)))
+        controls.addView(radarTime, LinearLayout.LayoutParams(dp(92), dp(40)))
+        speedButton =
+            label("1×", 11f, Hud.ink, true).apply {
+                tag = "radar-speed"
+                gravity = Gravity.CENTER
+                contentDescription = "Playback speed, 1×"
+                setOnClickListener {
+                    playbackSpeed =
+                        when (playbackSpeed) {
+                            1.0 -> 2.0
+                            2.0 -> 0.5
+                            else -> 1.0
+                        }
+                    speedButton.text = speedLabel()
+                    speedButton.contentDescription = "Playback speed, ${speedLabel()}"
+                    if (playing) {
+                        handler.removeCallbacks(advance)
+                        handler.postDelayed(advance, playDelay())
+                    }
+                }
+            }
+        controls.addView(speedButton, LinearLayout.LayoutParams(dp(48), dp(40)))
         radarPanel.addView(
             controls,
             FrameLayout.LayoutParams(-1, dp(40), Gravity.BOTTOM),
@@ -823,7 +863,11 @@ class MainActivity : Activity() {
     private fun updateRadarAccessibility() {
         val seq = sequence
         val frame = map.frame
-        radarTime.text = frame?.let { Times.format(it.time, "HH:mm", repo.place.zone) } ?: "—"
+        radarTime.text =
+            frame?.let {
+                val time = Times.format(it.time, "HH:mm", repo.place.zone)
+                if (it.lead > 0) "$time +${it.lead}" else "$time OBS"
+            } ?: "—"
         radarTime.contentDescription =
             frame?.let {
                 "Radar ${Times.format(it.time, "EEEE dd MMM yyyy HH:mm z", repo.place.zone)}, ${if (it.lead > 0) "forecast +${it.lead} minutes" else "observation"}"
@@ -893,14 +937,15 @@ class MainActivity : Activity() {
                 timeline.selected = frameIndex
                 updateRadarAccessibility()
                 updateRadarNotice()
-                if (playing && active && radarVisible)
-                    handler.postDelayed(
-                        advance,
-                        if (frameIndex == sequence?.frames?.lastIndex) 1400 else 700,
-                    )
+                if (playing && active && radarVisible) handler.postDelayed(advance, playDelay())
             }
         }
         frames.get(frame.file)?.let {
+            display(it)
+            return
+        }
+        repo.takeRadarBitmap(frame.file)?.let {
+            frames.put(frame.file, it)
             display(it)
             return
         }
@@ -929,12 +974,19 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun speedLabel() = if (playbackSpeed == 0.5) "0.5×" else "${playbackSpeed.toInt()}×"
+
+    private fun playDelay(): Long {
+        val base = if (frameIndex == sequence?.frames?.lastIndex) 1400 else 700
+        return (base / playbackSpeed).toLong()
+    }
+
     private fun setPlaying(value: Boolean) {
         playing = value
         playButton.isSelected = value
         playButton.setImageResource(if (value) R.drawable.ic_pause else R.drawable.ic_play)
         handler.removeCallbacks(advance)
-        if (value) handler.postDelayed(advance, 700)
+        if (value) handler.postDelayed(advance, playDelay())
     }
 
     private fun showPage(value: Page) {
@@ -1199,6 +1251,7 @@ class MainActivity : Activity() {
         super.onStart()
         started = true
         stopped = false
+        map.setPaused(false)
         placeChoices.foreground(true)
         if (ready) {
             val changedWhileStopped = networkChangedWhileStopped
@@ -1206,6 +1259,7 @@ class MainActivity : Activity() {
             val was = repo.online
             val online = repo.connection()
             if (online && (!was || changedWhileStopped)) refresh()
+            if (radarVisible) repo.showRadar()
         }
     }
 
@@ -1213,6 +1267,8 @@ class MainActivity : Activity() {
         showRadarDetails(false)
         started = false
         stopped = true
+        map.setPaused(true)
+        repo.pauseRadar()
         placeChoices.foreground(false)
         solarGeneration.next()
         solarFuture?.cancel(true)
@@ -1236,7 +1292,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
-        map.saveViewport()
+        map.flushViewport()
         active = false
         setPlaying(false)
         handler.removeCallbacks(tick)
