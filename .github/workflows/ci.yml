@@ -53,38 +53,45 @@ jobs:
           test -n "$name" || { echo "::error::cannot read versionName"; exit 1; }
           test "v$name" = "$GITHUB_REF_NAME" ||
             { echo "::error::tag $GITHUB_REF_NAME does not match versionName $name"; exit 1; }
-      - name: Restore the public release signing key
-        # Every published APK must keep the signing identity of the earlier releases, otherwise an
-        # update fails with INSTALL_FAILED_UPDATE_INCOMPATIBLE.
+      - name: Restore the release signing key
+        # The dedicated key replaced the old public debug identity; installs from before the
+        # rotation need one reinstall before they can update in place again.
         env:
           KEYSTORE_B64: ${{ secrets.DRIZZIQ_KEYSTORE_B64 }}
+          STORE_PASSWORD: ${{ secrets.DRIZZIQ_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.DRIZZIQ_KEY_PASSWORD }}
         run: |
-          test -n "$KEYSTORE_B64" ||
-            { echo "::error::secret DRIZZIQ_KEYSTORE_B64 is missing"; exit 1; }
-          mkdir -p "$RUNNER_TEMP/android"
-          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/android/debug.keystore"
+          set -euo pipefail
+          for secret in KEYSTORE_B64 STORE_PASSWORD KEY_PASSWORD; do
+            [ -n "${!secret}" ] || { echo "::error::missing signing secret $secret"; exit 1; }
+          done
+          keystore="$RUNNER_TEMP/drizziq-release.jks"
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$keystore"
+          {
+            printf 'DRIZZIQ_STORE_FILE=%s\n' "$keystore"
+            printf 'DRIZZIQ_STORE_PASSWORD=%s\n' "$STORE_PASSWORD"
+            printf 'DRIZZIQ_KEY_PASSWORD=%s\n' "$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
       - name: Build, test and lint
-        env:
-          ANDROID_USER_HOME: ${{ runner.temp }}/android
         run: ./tools/verify
-      - name: Assert the APK keeps the public release signature
+      - name: Assert the APK keeps the release signature
         run: |
           set -euo pipefail
           apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1 || true)
           test -n "$apksigner" || { echo "::error::apksigner not found"; exit 1; }
-          apk=app/build/outputs/apk/debug/app-debug.apk
+          apk=app/build/outputs/apk/release/app-release.apk
           test -f "$apk" || { echo "::error::$apk missing"; exit 1; }
           "$apksigner" verify --print-certs "$apk" | tee "$RUNNER_TEMP/certs.txt"
-          grep -qi "certificate SHA-256 digest: cde2781a239ab2b876e06f66b2654196979ba3f1d619dbb660a8d32601df1988" \
+          grep -qi "certificate SHA-256 digest: 59d3288d932edeca6601f2c117d54ec5c4a362a70a3a6c71655a636d0fbc3152" \
             "$RUNNER_TEMP/certs.txt" ||
-            { echo "::error::APK is not signed with the public release key"; exit 1; }
+            { echo "::error::APK is not signed with the drizziq release key"; exit 1; }
       - name: Assert the APK reports the repository version
         run: |
           set -euo pipefail
           name=$(sed -n 's/^ *versionName = "\(.*\)"$/\1/p' app/build.gradle.kts)
           aapt2=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1 || true)
           test -n "$aapt2" || { echo "::error::aapt2 not found"; exit 1; }
-          "$aapt2" dump badging app/build/outputs/apk/debug/app-debug.apk |
+          "$aapt2" dump badging app/build/outputs/apk/release/app-release.apk |
             grep -q "versionName='$name' " ||
             { echo "::error::APK does not report versionName $name"; exit 1; }
       - name: Package release asset
@@ -92,7 +99,7 @@ jobs:
           set -euo pipefail
           name=$(sed -n 's/^ *versionName = "\(.*\)"$/\1/p' app/build.gradle.kts)
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk "dist/drizziq-$name.apk"
+          cp app/build/outputs/apk/release/app-release.apk "dist/drizziq-$name.apk"
           cd dist
           sha256sum "drizziq-$name.apk" >"drizziq-$name.apk.sha256"
           cat "drizziq-$name.apk.sha256"

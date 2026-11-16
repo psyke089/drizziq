@@ -47,8 +47,13 @@
 - Build phone APKs: `./tools/verify --gradle-only assembleDebug assembleDebugAndroidTest`. Install matching builds with `adb -s SERIAL install -r app/build/outputs/apk/debug/app-debug.apk` and `adb -s SERIAL install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk`. The runner never installs/uninstalls apps. Reports/APKs are under ignored `app/build/`; phone logs under `tmp/verification/`.
 - Phone checks: `python3 tools/verify_phone.py --serial SERIAL`; use repeatable `--phase NAME` for targeted checks, `--focused` for additional behavioral regressions, `--live` for actual providers, `--places-integration` for place/favourite persistence, and explicit `--full` for connectivity integration. Consult `--help` for maintained phases.
 - Default phone checks use a fixed clock, isolated files/preferences and fixture transport that rejects unexpected HTTP. Snapshot/restore real places, favourites and map camera (including preference `.bak` files) even on failure; attempt all restorations and reopen the app. Keep radio-changing phases inside the full runner's restoration scope.
-- Use an explicit serial when multiple devices are attached. Preserve app data and permissions. Never uninstall to resolve signing mismatch. Verify foreground package/current bounds before coordinate taps; prefer semantic selectors. Instrumentation may exit to the launcher.
-- Debug/published APKs share `~/.android/debug.keystore`; override only through `ANDROID_USER_HOME`. Do not commit keys/passwords. Gradle release builds are unsigned build checks, not published installation artifacts.
+- Use an explicit serial when multiple devices are attached. Preserve app data and permissions. Never uninstall to resolve signing mismatch; the only exception is the documented one-time key rotation. Verify foreground package/current bounds before coordinate taps; prefer semantic selectors. Instrumentation may exit to the launcher.
+- The published `app-release.apk` is signed with the project's dedicated release key. Locally
+  the keystore lives at `~/.android/keys/drizziq/drizziq-release.jks`; `app/build.gradle.kts`
+  reads `drizziq.storeFile` plus its passwords from Gradle properties, and CI restores the same
+  key from `DRIZZIQ_KEYSTORE_B64` with `DRIZZIQ_STORE_PASSWORD` and `DRIZZIQ_KEY_PASSWORD`.
+  Do not commit keys or passwords. The key replaced the old public debug identity on
+  2026-11-16, so installs from before the rotation need one reinstall.
 
 ## Remotes and releases
 

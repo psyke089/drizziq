@@ -1,5 +1,13 @@
 plugins { id("com.android.application") }
 
+// Signing values come from ~/.gradle/gradle.properties (drizziq.*) or the CI environment.
+// The dedicated release key lives at ~/.android/keys/drizziq/drizziq-release.jks. It replaced
+// the old public debug identity, so installs from before the rotation need one reinstall.
+fun signingValue(property: String, env: String): String? =
+    providers.gradleProperty(property).orNull ?: System.getenv(env)
+
+val releaseStoreFile = signingValue("drizziq.storeFile", "DRIZZIQ_STORE_FILE")
+
 android {
     namespace = "app.drizziq"
     compileSdk { version = release(37) }
@@ -16,7 +24,22 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    buildTypes { release { isMinifyEnabled = false } }
+    signingConfigs {
+        if (releaseStoreFile != null) {
+            create("release") {
+                storeFile = file(releaseStoreFile)
+                storePassword = signingValue("drizziq.storePassword", "DRIZZIQ_STORE_PASSWORD")
+                keyAlias = signingValue("drizziq.keyAlias", "DRIZZIQ_KEY_ALIAS") ?: "drizziq"
+                keyPassword = signingValue("drizziq.keyPassword", "DRIZZIQ_KEY_PASSWORD")
+            }
+        }
+    }
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            if (releaseStoreFile != null) signingConfig = signingConfigs.getByName("release")
+        }
+    }
     buildFeatures { buildConfig = true }
     lint {
         warningsAsErrors = true
