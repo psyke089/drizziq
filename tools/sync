@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Publish the canonical Codeberg history to the public GitHub mirror.
+# origin (Codeberg) is authoritative; github is a copy and the release host.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+# Only the release tag at HEAD travels. Older tags are history, and at least one
+# (enso v1.3.0) intentionally differs between hosts; `--tags` would fail on it.
+mapfile -t tags < <(git tag --points-at HEAD --list 'v*' | sort -V)
+
+git push origin main
+git push github main
+
+# Tags go in their own push: a branch and tag sent together only start GitHub's
+# branch run, so the v* release job never fires.
+if ((${#tags[@]})); then
+  git push origin "${tags[@]}"
+  git push github "${tags[@]}"
+fi

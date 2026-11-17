@@ -57,7 +57,7 @@
 
 ## Remotes and releases
 
-- Push `main` to the private upstream and directly to the public `github` remote (`git@github.com:psyke089/drizziq.git`). There is no push mirror. Push `main` and release tags separately, and keep tags in sync (`git push github main`, `git push github --tags`).
+- `origin` is Codeberg (canonical, private); `github` (`git@github.com:psyke089/drizziq.git`) is the public mirror and release host. `./tools/sync` publishes `main` and the release tag at HEAD to both, in their own pushes so the `v*` release run fires. Never force `github`; GitHub PRs are read-only, so apply patches locally and push through `origin`.
 - `.github/workflows/ci.yml` runs the local gate on main pushes; tags `v*` also validate version/signature and publish the signed debug APK plus SHA-256. `workflow_dispatch` builds a preview; recover a missed tag run with `gh workflow run ci.yml --ref v<VERSION>`. `tools/install-android-sdk.sh` installs CI's required SDK packages.
 - Published builds restore the existing key from `DRIZZIQ_KEYSTORE_B64`; keep its signing identity so upgrades retain app data. A version tag must match `versionName`.
 - Refresh the README screenshot when the UI changes materially. Use a public city preset, capture raw, and restore original places/camera. No mandatory screenshot-attachment or URL-audit ritual for every release; screenshot-only updates need no app test run.
