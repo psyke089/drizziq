@@ -2,11 +2,6 @@
     <string name="city_search_title">Search city</string>
     <string name="city_search_waiting">Searching…</string>
     <string name="city_search_empty">No matches. Try another city.</string>
-    <string name="city_search_cached">Cached results — select a place</string>
-    <plurals name="city_search_results">
-        <item quantity="one">%1$d match — select a place</item>
-        <item quantity="other">%1$d matches — select a place</item>
-    </plurals>
     <string name="city_search_retained">Cached results · %1$s</string>
     <string name="place_attribution">Place names: Open-Meteo · GeoNames</string>
     <string name="saved_places">Saved places</string>

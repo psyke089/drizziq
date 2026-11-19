@@ -64,9 +64,19 @@ class PhoneExercise : Instrumentation() {
         start()
     }
 
-    private fun nodes(
-        node: AccessibilityNodeInfo? = uiAutomation.rootInActiveWindow
-    ): List<AccessibilityNodeInfo> =
+    private fun nodes(): List<AccessibilityNodeInfo> {
+        val active = nodes(uiAutomation.rootInActiveWindow)
+        if (active.none { it.contentDescription?.toString() == "CITY NAME" }) return active
+        val roots =
+            uiAutomation.windows
+                .filter {
+                    it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION
+                }
+                .mapNotNull { it.root }
+        return (active + roots.flatMap { nodes(it) }).distinct()
+    }
+
+    private fun nodes(node: AccessibilityNodeInfo?): List<AccessibilityNodeInfo> =
         if (node == null) emptyList()
         else listOf(node) + (0 until node.childCount).flatMap { nodes(node.getChild(it)) }
 
@@ -280,6 +290,13 @@ class PhoneExercise : Instrumentation() {
     }
 
     override fun onStart() {
+        uiAutomation.serviceInfo =
+            uiAutomation.serviceInfo.apply {
+                flags =
+                    flags or
+                        android.accessibilityservice.AccessibilityServiceInfo
+                            .FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            }
         val result = Bundle()
         try {
             check(phase in knownPhases) { "Unknown phase: $phase" }
@@ -305,13 +322,21 @@ class PhoneExercise : Instrumentation() {
                     }
                     click("Radar")
                     waitFor("radar frames") { has("OBSERVED") && has("frames") }
-                    fun timeline() = nodes().first { it.className == "android.widget.SeekBar" }
-                    val before = timeline().rangeInfo.current
-                    check(timeline().performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD))
-                    waitFor("timeline selection") { timeline().rangeInfo.current != before }
-                    val paused = timeline().rangeInfo.current
+                    fun timeline() =
+                        nodes().firstOrNull { it.className == "android.widget.SeekBar" }
+                    val before = checkNotNull(timeline()).rangeInfo.current
+                    check(
+                        checkNotNull(timeline())
+                            .performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                    )
+                    waitFor("timeline selection") {
+                        timeline()?.rangeInfo?.current?.let { it != before } == true
+                    }
+                    val paused = checkNotNull(timeline()).rangeInfo.current
                     click("Play or pause radar animation")
-                    waitFor("radar playback", 10000) { timeline().rangeInfo.current != paused }
+                    waitFor("radar playback", 10000) {
+                        timeline()?.rangeInfo?.current?.let { it != paused } == true
+                    }
                     click("Play or pause radar animation")
                     click("Places")
                     check(has("FAVOURITES"))
@@ -1318,6 +1343,13 @@ class PhoneExercise : Instrumentation() {
                             has("Deutscher Wetterdienst")
                     }
                     click("Close dialog")
+                    for (tab in listOf("Week", "Radar", "Places", "Today")) {
+                        click(tab)
+                        check(has("Warnungen")) { "Missing shared warning link in $tab" }
+                        click("Warnungen")
+                        waitFor("warning details in $tab") { has("Fixture wind warning") }
+                        click("Close dialog")
+                    }
                     click("Munich, switch saved place")
                     waitFor("saved places overlay") { has("Saved places") }
                     check(has("Munich") && has("Berlin"))
@@ -1340,6 +1372,39 @@ class PhoneExercise : Instrumentation() {
                         "Switcher remained with only one favourite"
                     }
                     check(has("Open-Meteo") && has("GeoNames"))
+                    click("Remove current favourite")
+                    check(store.favourites().isEmpty())
+                    click("Save current as favourite")
+                    check(store.favourites().single() == berlin)
+                    enter("CITY NAME", "München")
+                    waitFor("city dropdown") { has("Select city result") }
+                    click("Clear city search")
+                    check(
+                        nodes().any {
+                            it.isEditable &&
+                                it.contentDescription?.toString() == "CITY NAME" &&
+                                (it.text.isNullOrEmpty() || it.text.toString() == "Search city")
+                        }
+                    )
+                    check(!has("Select city result"))
+                    enter("CITY NAME", "München")
+                    waitFor("city dropdown after clearing") { has("Select city result") }
+                    check(!has("matches") && !has("match —"))
+                    click(
+                        nodes()
+                            .first {
+                                it.contentDescription
+                                    ?.toString()
+                                    ?.startsWith("Select city result ") == true
+                            }
+                            .contentDescription
+                            .toString()
+                    )
+                    check(
+                        nodes().any {
+                            it.contentDescription?.toString() == "Places" && it.isSelected
+                        }
+                    )
                     result.putString(
                         "checks",
                         "multiple saved places open and switch from the header; dismissal preserves selection; source credit stays in search",
@@ -1399,13 +1464,15 @@ class PhoneExercise : Instrumentation() {
                             "Search result coordinates were changed"
                         }
                         check(selected.zone in java.util.TimeZone.getAvailableIDs())
-                        waitFor("nearest forecast distance", 90000) { has("km away") }
-                        click("Places")
-                        click("SAVE CURRENT AS FAVOURITE")
-                        enter("FAVOURITE LABEL", "Geocoding integration snapshot")
-                        click("Save")
+                        check(
+                            nodes().any {
+                                it.contentDescription?.toString() == "Places" && it.isSelected
+                            }
+                        )
+                        if (has("Remove current favourite")) click("Remove current favourite")
+                        click("Save current as favourite")
                         val saved = PlaceStore(appContext).selected()
-                        check(saved.geocodeId == selected.geocodeId && saved.geocodeLabelEdited)
+                        check(saved == selected)
                         val monitor = addMonitor(MainActivity::class.java.name, null, false)
                         try {
                             runOnMainSync { owner.recreate() }
@@ -1435,15 +1502,13 @@ class PhoneExercise : Instrumentation() {
                                 !nodes().any { it.text?.toString() == "Current location" }
                         }
                         click("Places")
-                        click("SAVE CURRENT AS FAVOURITE")
+                        if (has("Remove current favourite")) click("Remove current favourite")
+                        click("Save current as favourite")
                         check(
-                            nodes().any {
-                                it.isEditable &&
-                                    it.contentDescription?.toString() == "FAVOURITE LABEL" &&
-                                    it.text?.toString() == "MUENCHEN STADT"
+                            PlaceStore(appContext).favourites().any {
+                                it == PlaceStore(appContext).selected()
                             }
                         )
-                        click("Close dialog")
                         fixture(Place("Coverage test", 0.0, 0.0, "UTC"))
                         waitFor("coverage explanation") {
                             has("No DWD forecast point within 50 km")
@@ -1580,7 +1645,7 @@ class PhoneExercise : Instrumentation() {
                         val beforeRetry = PhoneFixtures.requests.get()
                         submitSearch()
                         waitFor("keyboard refresh over warm city cache", 5000) {
-                            PhoneFixtures.requests.get() > beforeRetry && has("match")
+                            PhoneFixtures.requests.get() > beforeRetry && has("Select city result")
                         }
                     }
                     enter("CITY NAME", "Berlin")
@@ -2038,9 +2103,8 @@ class PhoneExercise : Instrumentation() {
                     waitFor("live Munich forecast") { has("Temperature ") && has("LIVE") }
                     waitFor("Munich forecast") { has("MUENCHEN STADT") && has("LIVE") }
                     click("PLACES")
-                    click("SAVE CURRENT AS FAVOURITE")
-                    enter("FAVOURITE LABEL", "Munich home")
-                    click("Save")
+                    if (has("Remove current favourite")) click("Remove current favourite")
+                    click("Save current as favourite")
                     click("PLACES")
                     enter("CITY NAME", "Berlin")
                     submitSearch()
@@ -2061,13 +2125,13 @@ class PhoneExercise : Instrumentation() {
                             .contentDescription
                             .toString()
                     )
+                    click("Today")
                     waitFor("Berlin live forecast") {
                         has("BERLIN") && has("LIVE") && has("Temperature ")
                     }
                     click("PLACES")
-                    click("SAVE CURRENT AS FAVOURITE")
-                    enter("FAVOURITE LABEL", "Berlin saved")
-                    click("Save")
+                    if (has("Remove current favourite")) click("Remove current favourite")
+                    click("Save current as favourite")
                     click("Radar")
                     waitFor("radar frames", 180000) { has("OBSERVED") && has("frames") }
                     val map =
@@ -2119,7 +2183,7 @@ class PhoneExercise : Instrumentation() {
                     waitFor("animation loops", 10000) { has("OBSERVED") }
                     click("Play or pause radar animation")
                     click("PLACES")
-                    click("Select favourite Munich home")
+                    click("Select favourite Munich")
                     result.putString(
                         "checks",
                         "live Munich; explicit Berlin search selection; live Berlin; save two favourites; radar pan; two-finger pinch; accessible zoom and recenter; scrub to +120; playback loop; select favourite",
@@ -2127,18 +2191,19 @@ class PhoneExercise : Instrumentation() {
                 }
                 "persistence" -> {
                     click("PLACES")
-                    check(has("Berlin saved"))
-                    check(has("Munich home"))
-                    click("Select favourite Berlin saved")
+                    check(has("Berlin"))
+                    check(has("Munich"))
+                    click("Select favourite Berlin")
+                    click("Today")
                     waitFor("selected persisted Berlin") { has("Temperature ") && has("BERLIN") }
                     click("PLACES")
-                    click("Delete favourite Berlin saved")
+                    click("Delete favourite Berlin")
                     check(
                         nodes().none {
-                            it.contentDescription?.toString() == "Select favourite Berlin saved"
+                            it.contentDescription?.toString() == "Select favourite Berlin"
                         }
                     )
-                    click("Select favourite Munich home")
+                    click("Select favourite Munich")
                     result.putString(
                         "checks",
                         "favourites survived force-stop; selected Berlin; deleted Berlin; selected Munich",

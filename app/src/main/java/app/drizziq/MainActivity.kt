@@ -31,6 +31,7 @@ class MainActivity : Activity() {
     private lateinit var root: LinearLayout
     private lateinit var content: FrameLayout
     private lateinit var placeTitle: TextView
+    private lateinit var favouriteButton: ImageButton
     private var favourites = emptyList<Place>()
     private lateinit var warningLink: TextView
     private var warningDialog: AlertDialog? = null
@@ -186,10 +187,7 @@ class MainActivity : Activity() {
                 zones,
                 { repo.online },
                 { place ->
-                    if (choose(place)) {
-                        showPage(Page.TODAY)
-                        true
-                    } else false
+                    choose(place)
                 },
                 { place -> zoneEntry(place) },
             )
@@ -298,7 +296,7 @@ class MainActivity : Activity() {
             }
         val placeColumn = column()
         placeTitle =
-            label("Munich", 24f).apply {
+            label("Munich", 28f).apply {
                 tag = "place-name"
                 setOnClickListener { switchSavedPlace() }
                 isClickable = false
@@ -308,7 +306,16 @@ class MainActivity : Activity() {
                 minimumHeight = dp(44)
             }
         coordinates = label("", 9f, Hud.muted, true)
-        placeColumn.addView(placeTitle, LinearLayout.LayoutParams(-2, -2))
+        val nameRow = row()
+        nameRow.addView(placeTitle, LinearLayout.LayoutParams(-2, -2, 1f))
+        favouriteButton =
+            ImageButton(this).apply {
+                background = null
+                pad(9)
+                setOnClickListener { toggleFavourite() }
+            }
+        nameRow.addView(favouriteButton, LinearLayout.LayoutParams(dp(40), dp(44)))
+        placeColumn.addView(nameRow, LinearLayout.LayoutParams(-2, -2))
         placeColumn.space(6)
         placeColumn.addView(coordinates)
         warningLink =
@@ -403,7 +410,7 @@ class MainActivity : Activity() {
         hourlyView = null
         hourlyKey = key
         val body =
-            column().apply {
+            ForecastBody(this).apply {
                 tag = "forecast-body"
                 setPadding(0, 0, 0, 0)
                 clipToPadding = false
@@ -464,7 +471,10 @@ class MainActivity : Activity() {
         if (page != Page.WEEK) buildHourly(body, forecast, place, now, hourlyOffset)
         else buildWeek(body, forecast, place, now)
         if (page != Page.WEEK) {
-            body.space(4)
+            body.sunGap =
+                View(this).also {
+                    body.addView(it, LinearLayout.LayoutParams(1, 0))
+                }
             addSunriseCard(body, place)
         } else {
             body.space(16)
@@ -1115,7 +1125,7 @@ class MainActivity : Activity() {
         repo.connection()
         if (force || repo.forecast.needsRefresh(now, 30 * 60_000L)) repo.refreshForecast()
         if (force || radarVisible) repo.refreshRadar()
-        if (force && page == Page.TODAY) repo.refreshWarnings(now, force = true)
+        if (force) repo.refreshWarnings(now, force = true)
     }
 
     private fun choose(place: Place, persist: Boolean = true): Boolean {
@@ -1136,17 +1146,18 @@ class MainActivity : Activity() {
         setPlaying(false)
         lastRefresh = AppPlatform.now()
         repo.select(place)
+        if (page == Page.PLACES) locations()
         return true
     }
 
     private fun bindWarnings(now: Long) {
-        val warnings = if (page == Page.TODAY) repo.warnings(now) else emptyList()
+        val warnings = repo.warnings(now)
         if (warnings != visibleWarnings) {
             warningDialog?.dismiss()
             visibleWarnings = warnings
         }
         warningLink.visibility = if (warnings.isEmpty()) View.GONE else View.VISIBLE
-        if (page == Page.TODAY && started) repo.refreshWarnings(now)
+        if (started) repo.refreshWarnings(now)
     }
 
     private fun showWarnings() {
@@ -1182,6 +1193,14 @@ class MainActivity : Activity() {
 
     private fun bindPlaceTitle() {
         val name = placeDisplayName(repo.place, repo.forecastPoint?.station)
+        favourites = store.favourites()
+        val saved = favourites.any { it.lat == repo.place.lat && it.lon == repo.place.lon }
+        favouriteButton.isSelected = saved
+        favouriteButton.setImageResource(
+            if (saved) R.drawable.ic_favourite_filled else R.drawable.ic_favourite
+        )
+        favouriteButton.contentDescription =
+            if (saved) "Remove current favourite" else "Save current as favourite"
         val canSwitch = favourites.size > 1
         placeTitle.text = name
         placeTitle.contentDescription =
@@ -1216,8 +1235,7 @@ class MainActivity : Activity() {
                 choices,
                 select = { place ->
                     if (placeChoices.isCurrent(token)) {
-                        if (place == repo.place) dialog.dismiss()
-                        else if (choose(place) && page == Page.PLACES) locations()
+                        if (place == repo.place) dialog.dismiss() else choose(place)
                     }
                 },
             )
@@ -1257,7 +1275,7 @@ class MainActivity : Activity() {
                 setTextColor(Hud.ink)
                 setHintTextColor(Hud.muted)
                 textSize = 16f
-                setPadding(dp(12), 0, dp(12), 0)
+                setPadding(dp(12), 0, dp(44), 0)
                 compoundDrawablePadding = dp(10)
                 setCompoundDrawablesRelative(
                     getDrawable(R.drawable.ic_search)?.apply { setBounds(0, 0, dp(20), dp(20)) },
@@ -1267,7 +1285,22 @@ class MainActivity : Activity() {
                 )
                 background = panel(Hud.legend, Hud.line, dp(12).toFloat())
             }
-        searchRow.addView(input, LinearLayout.LayoutParams(0, dp(48), 1f))
+        val searchField = FrameLayout(this)
+        searchField.addView(input, FrameLayout.LayoutParams(-1, -1))
+        val clearSearch =
+            ImageButton(this).apply {
+                setImageResource(R.drawable.ic_close)
+                contentDescription = "Clear city search"
+                background = null
+                pad(11)
+                visibility = View.INVISIBLE
+                setOnClickListener {
+                    input.text.clear()
+                    input.requestFocus()
+                }
+            }
+        searchField.addView(clearSearch, FrameLayout.LayoutParams(dp(40), -1, Gravity.END))
+        searchRow.addView(searchField, LinearLayout.LayoutParams(0, dp(48), 1f))
         searchRow.addView(
             iconButton(R.drawable.ic_location_crosshair, "USE CURRENT LOCATION") {
                 placeChoices.currentLocation()
@@ -1276,9 +1309,7 @@ class MainActivity : Activity() {
         )
         body.addView(searchRow)
         body.addView(placeCreditView())
-        val results = column()
-        body.addView(results)
-        placeChoices.bindSearch(input, results)
+        placeChoices.bindSearch(input, clearSearch)
         body.space(16)
         val section = row()
         section.addView(
@@ -1294,19 +1325,13 @@ class MainActivity : Activity() {
                 rightMargin = dp(12)
             },
         )
-        section.addView(
-            iconButton(R.drawable.ic_save_favourite, "SAVE CURRENT AS FAVOURITE") {
-                    saveFavourite()
-                }
-                .apply { background = null },
-            LinearLayout.LayoutParams(dp(48), dp(48)),
-        )
         body.addView(section)
+        body.space(12)
         body.addView(
             favouriteList(
                 favourites,
                 select = { place ->
-                    if (choose(place)) showPage(Page.TODAY)
+                    choose(place)
                 },
                 delete = { place ->
                     if (store.delete(place)) locations()
@@ -1452,7 +1477,6 @@ class MainActivity : Activity() {
                 }
                 if (choose(seed.copy(zone = value))) {
                     dialog.dismiss()
-                    showPage(Page.TODAY)
                 }
             }
         }
@@ -1460,56 +1484,19 @@ class MainActivity : Activity() {
         dialog.show()
     }
 
-    private fun saveFavourite() {
-        val token = placeChoices.invalidate()
-        val body = column().apply { pad(20) }
-        val name =
-            field(
-                body,
-                "FAVOURITE LABEL",
-                placeDisplayName(repo.place, repo.forecastPoint?.station),
-            )
-        val dialog =
-            placeDialog(
-                AlertDialog.Builder(this).setView(body).setPositiveButton("Save", null),
-                "Save favourite",
-            )
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val label = compactPlaceLabel(name.text.toString().trim())
-                if (label.isEmpty()) {
-                    name.error = "Enter a label"
-                    return@setOnClickListener
-                }
-                if (!placeChoices.isCurrent(token)) return@setOnClickListener
-                val place =
-                    if (
-                        label == placeDisplayName(repo.place, repo.forecastPoint?.station) &&
-                            repo.place.geocodeId != null &&
-                            !repo.place.geocodeLabelEdited
-                    )
-                        repo.place.copy(label = label)
-                    else repo.place.relabel(label)
-                try {
-                    store.save(place)
-                } catch (error: Exception) {
-                    Toast.makeText(
-                            this,
-                            "Favourite could not be saved. Please retry.",
-                            Toast.LENGTH_LONG,
-                        )
-                        .show()
-                    return@setOnClickListener
-                }
-                val selected = choose(place)
-                locations()
-                if (!selected) return@setOnClickListener
-                dialog.dismiss()
-                Toast.makeText(this, "Favourite saved", Toast.LENGTH_SHORT).show()
-            }
+    private fun toggleFavourite() {
+        placeChoices.invalidate()
+        val place = repo.place
+        val saved = store.favourites().any { it.lat == place.lat && it.lon == place.lon }
+        val success =
+            if (saved) store.delete(place) else runCatching { store.save(place) }.isSuccess
+        if (!success) {
+            Toast.makeText(this, "Favourite could not be saved. Please retry.", Toast.LENGTH_LONG)
+                .show()
+            return
         }
-        placeChoices.track(dialog, token)
-        dialog.show()
+        bindPlaceTitle()
+        if (page == Page.PLACES) locations()
     }
 
     override fun onStart() {

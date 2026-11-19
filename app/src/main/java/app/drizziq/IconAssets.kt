@@ -7,6 +7,8 @@ object IconAssets {
             "chevron-down" -> R.drawable.ic_chevron_down
             "close" -> R.drawable.ic_close
             "delete" -> R.drawable.ic_delete
+            "favourite" -> R.drawable.ic_favourite
+            "favourite-filled" -> R.drawable.ic_favourite_filled
             "info" -> R.drawable.ic_info
             "launcher-foreground" -> R.drawable.ic_launcher_foreground
             "launcher-legacy" -> R.drawable.ic_launcher_legacy

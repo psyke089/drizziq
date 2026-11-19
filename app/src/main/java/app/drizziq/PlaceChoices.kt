@@ -17,7 +17,8 @@ import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
-import android.widget.LinearLayout
+import android.widget.PopupWindow
+import android.widget.ScrollView
 import android.widget.Toast
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.Future
@@ -120,12 +121,58 @@ class PlaceChoices(
         Toast.makeText(activity, "City-search cache cleared", Toast.LENGTH_SHORT).show()
     }
 
-    fun bindSearch(input: EditText, results: LinearLayout) {
+    fun bindSearch(input: EditText, clearButton: View) {
+        val results =
+            activity.column().apply {
+                pad(8)
+            }
+        val dropdown =
+            PopupWindow(
+                    ScrollView(activity).apply {
+                        background = panel(Hud.panel, Hud.line, activity.dp(12).toFloat())
+                        clipToOutline = true
+                        addView(results)
+                    },
+                    0,
+                    0,
+                )
+                .apply {
+                    isOutsideTouchable = true
+                    setBackgroundDrawable(panel(Hud.panel, Hud.line, activity.dp(12).toFloat()))
+                    elevation = activity.dp(8).toFloat()
+                    inputMethodMode = PopupWindow.INPUT_METHOD_NEEDED
+                    setOnDismissListener { invalidate(false) }
+                }
+        fun showResults() {
+            if (!input.isAttachedToWindow || closed || !foreground) return
+            results.measure(
+                View.MeasureSpec.makeMeasureSpec(input.width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            )
+            val frame = android.graphics.Rect()
+            input.getWindowVisibleDisplayFrame(frame)
+            val position = IntArray(2)
+            input.getLocationOnScreen(position)
+            val height =
+                minOf(
+                        results.measuredHeight,
+                        activity.dp(280),
+                        frame.bottom - position[1] - input.height - activity.dp(4),
+                    )
+                    .coerceAtLeast(1)
+            if (dropdown.isShowing) dropdown.update(input, 0, activity.dp(4), input.width, height)
+            else {
+                dropdown.width = input.width
+                dropdown.height = height
+                dropdown.showAsDropDown(input, 0, activity.dp(4))
+            }
+        }
         val status = activity.label("", 12f, Hud.muted).apply { visibility = View.GONE }
         results.addView(status)
         val rows = activity.column()
         results.addView(rows)
         clearInlineSearch = {
+            dropdown.dismiss()
             if (input.hasFocus()) {
                 activity
                     .getSystemService(InputMethodManager::class.java)
@@ -143,9 +190,9 @@ class PlaceChoices(
                 try {
                     Geocoding.query(text)
                 } catch (error: IllegalArgumentException) {
-                    input.error = error.message
                     status.text = error.message
                     status.setTextColor(Hud.amber)
+                    showResults()
                     return
                 }
             input.error = null
@@ -153,6 +200,7 @@ class PlaceChoices(
             rows.removeAllViews()
             status.setText(R.string.city_search_waiting)
             status.setTextColor(Hud.muted)
+            showResults()
             val connected = online()
             future = executor.submit {
                 val result =
@@ -168,16 +216,7 @@ class PlaceChoices(
                     val candidates =
                         when (result) {
                             is SearchResult.Results -> {
-                                status.text =
-                                    if (result.cached)
-                                        activity.getString(R.string.city_search_cached)
-                                    else
-                                        activity.resources.getQuantityString(
-                                            R.plurals.city_search_results,
-                                            result.candidates.size,
-                                            result.candidates.size,
-                                        )
-                                status.setTextColor(Hud.muted)
+                                status.visibility = View.GONE
                                 result.candidates
                             }
                             is SearchResult.Empty -> {
@@ -230,8 +269,9 @@ class PlaceChoices(
                                     ellipsize = android.text.TextUtils.TruncateAt.END
                                 }
                         )
-                        rows.space(8)
+                        rows.space(4)
                     }
+                    showResults()
                 }
             }
         }
@@ -257,6 +297,8 @@ class PlaceChoices(
 
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                     input.error = null
+                    clearButton.visibility = if (s.isNullOrEmpty()) View.INVISIBLE else View.VISIBLE
+                    dropdown.dismiss()
                     rows.removeAllViews()
                     status.visibility = View.GONE
                     debounce.edited(s?.toString().orEmpty())

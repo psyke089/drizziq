@@ -15,8 +15,8 @@ android {
         applicationId = "app.drizziq"
         minSdk = 24
         targetSdk = 37
-        versionCode = 15
-        versionName = "1.7.0"
+        versionCode = 16
+        versionName = "1.7.1"
         testInstrumentationRunner = "app.drizziq.PhoneExercise"
     }
     compileOptions {

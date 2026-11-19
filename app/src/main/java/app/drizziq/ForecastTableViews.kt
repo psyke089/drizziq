@@ -98,3 +98,25 @@ private fun formatCoordinates(lat: Double, lon: Double) =
         abs(lon),
         if (lon >= 0) "E" else "W",
     )
+
+/** The sun-card gap yields space before the forecast needs vertical scrolling. */
+internal class ForecastBody(context: Context) : LinearLayout(context) {
+    var sunGap: android.view.View? = null
+
+    init {
+        orientation = VERTICAL
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val gap = sunGap
+        if (gap == null) {
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+            return
+        }
+        gap.layoutParams.height = 0
+        super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED))
+        val available = MeasureSpec.getSize(heightMeasureSpec)
+        gap.layoutParams.height = (available - measuredHeight).coerceIn(0, context.dp(24))
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+    }
+}

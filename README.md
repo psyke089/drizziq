@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/psyke089/drizziq"><img src="docs/badges/github.svg" alt="GitHub · public repository"></a>
-  <a href="app/build.gradle.kts"><img src="docs/badges/version.svg" alt="Version 1.7.0"></a>
+  <a href="app/build.gradle.kts"><img src="docs/badges/version.svg" alt="Version 1.7.1"></a>
   <img src="docs/badges/android.svg" alt="Android 7.0+ · API 24">
   <a href="LICENSE"><img src="docs/badges/license.svg" alt="Licence MIT"></a>
 </p>
@@ -17,7 +17,7 @@ Native Kotlin for Android 7.0+, one dark HUD, no cloud account. Station selectio
 
 <p align="center"><img src="docs/screenshot.png" alt="Today view with hourly forecast" width="300"></p>
 
-The selected place's civil day from midnight through noon tomorrow: hourly temperature, precipitation, wind and gusts from the nearest bundled DWD MOSMIX station within 50 km; station details and distance are shown in Week. The table starts at the current hour; enable `past` to include earlier hours (the choice is saved). The date follows horizontal scrolling, a line marks the next day, and the refresh icon reloads DWD data. Official DWD weather warnings for the selected place appear under the city name when available. Sun times are computed on device and work offline. Hours before the latest issue are filled from the preceding issue and stay forecasts, not observations; fields DWD does not supply stay unknown. A stale or failed refresh never silently replaces good data — cached readings are labelled and kept.
+The selected place's civil day from midnight through noon tomorrow: hourly temperature, precipitation, wind and gusts from the nearest bundled DWD MOSMIX station within 50 km; station details and distance are shown in Week. The table starts at the current hour; enable `past` to include earlier hours (the choice is saved). The date follows horizontal scrolling, a line marks the next day, and the refresh icon reloads DWD data. The shared header looks identical across Today, Week, Radar and Places. Available official DWD weather warnings appear under the city name in every view and open their details when tapped. Sun times are computed on device and work offline. Hours before the latest issue are filled from the preceding issue and stay forecasts, not observations; fields DWD does not supply stay unknown. A stale or failed refresh never silently replaces good data — cached readings are labelled and kept.
 
 ## Week
 
@@ -35,7 +35,7 @@ Pan, zoom, scrub and play the rain radar. The newest image appears first, cached
 
 <p align="center"><img src="docs/screenshot-places.png" alt="Places view with saved favourites" width="300"></p>
 
-Type directly in Places to search for a city. Results appear below the input after a 400 ms pause. The crosshair button takes one location snapshot. Tap the city name in the header to switch when two or more favourites are saved. Favourites keep their provenance and survive restarts. Positions are resolved locally without reverse geocoding, and location permission is optional.
+Type directly in Places to search for a city. Results appear in a dropdown after a 400 ms pause. Selecting a place keeps the current tab open. The crosshair button takes one location snapshot. Tap the city name in the header to switch when two or more favourites are saved. The bookmark beside the city name toggles its favourite status. Favourites keep their provenance and survive restarts. Positions are resolved locally without reverse geocoding, and location permission is optional.
 
 ## Build
 

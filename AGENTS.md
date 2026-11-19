@@ -9,6 +9,7 @@
 
 ## Design and assets
 
+- The shared header must always look identical in Today, Week, Radar and Places for the same selected place and data state. Keep its content, typography, spacing and controls consistent across tabs. Show available weather warnings in every view, with the same link to warning details.
 - One dark, sci-fi HUD palette with restrained typography/pictograms; no light mode or system-theme switching.
 - Generate artwork locally or use user-supplied assets. Editable SVGs in `artwork/icons/` are the source of truth. Builds run `tools/generate_icons.py`; edit SVGs, not generated vectors or `IconAssets.kt`. Runtime code may position/tint/rotate vectors; Canvas is for dynamic charts/maps, not icon shapes. See [artwork instructions](artwork/icons/README.md). Do not download icon packs or stock assets.
 - Manual icon regeneration/check: `python3 tools/generate_icons.py [--check]`. Preserve the launcher safe zone. Artwork is locally authored, adapted from the author's `todo-0` project, under the app's MIT licence.
