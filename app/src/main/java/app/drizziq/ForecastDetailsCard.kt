@@ -25,8 +25,6 @@ class ForecastDetailsCard(
         heading.addView(
             context.label(forecast.station.name, 15f).apply {
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                maxLines = 2
-                ellipsize = android.text.TextUtils.TruncateAt.END
             },
             LayoutParams(0, -2, 1f),
         )

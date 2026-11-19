@@ -3,6 +3,7 @@ package app.drizziq
 import android.app.Activity
 import android.app.AlertDialog
 import android.graphics.Typeface
+import android.graphics.drawable.InsetDrawable
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
@@ -36,6 +37,9 @@ internal fun Activity.placeDialog(builder: AlertDialog.Builder, title: CharSeque
         }
     header.addView(close, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.END))
     val dialog = builder.setCustomTitle(header).create()
+    dialog.window?.setBackgroundDrawable(
+        InsetDrawable(panel(Hud.panel, Hud.line, dp(16).toFloat()), dp(16), dp(8), dp(16), dp(8))
+    )
     close.setOnClickListener { dialog.cancel() }
     return dialog
 }

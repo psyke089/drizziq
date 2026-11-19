@@ -31,6 +31,10 @@ class MainActivity : Activity() {
     private lateinit var root: LinearLayout
     private lateinit var content: FrameLayout
     private lateinit var placeTitle: TextView
+    private var favourites = emptyList<Place>()
+    private lateinit var warningLink: TextView
+    private var warningDialog: AlertDialog? = null
+    private var visibleWarnings = emptyList<DwdWarning>()
     private lateinit var currentWeather: CurrentWeatherHeader
     private lateinit var coordinates: TextView
     private lateinit var forecastContainer: LinearLayout
@@ -173,6 +177,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         store = PlaceStore(this)
+        favourites = store.favourites()
         zones = ZoneLookup(this)
         repo = Repository(this) { if (ready) render() }
         placeChoices =
@@ -295,15 +300,29 @@ class MainActivity : Activity() {
         placeTitle =
             label("Munich", 20f).apply {
                 tag = "place-name"
+                setOnClickListener { switchSavedPlace() }
+                isClickable = false
+                compoundDrawablePadding = dp(6)
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                minLines = 2
-                maxLines = 2
-                ellipsize = android.text.TextUtils.TruncateAt.END
+                gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = dp(44)
             }
         coordinates = label("", 9f, Hud.muted, true)
-        placeColumn.addView(placeTitle)
+        placeColumn.addView(placeTitle, LinearLayout.LayoutParams(-2, -2))
         placeColumn.space(6)
         placeColumn.addView(coordinates)
+        warningLink =
+            label(getString(R.string.weather_warnings), 12f, Hud.amber).apply {
+                visibility = View.GONE
+                minimumHeight = dp(32)
+                gravity = Gravity.CENTER_VERTICAL
+                compoundDrawablePadding = dp(5)
+                val icon =
+                    getDrawable(R.drawable.ic_warning)?.apply { setBounds(0, 0, dp(16), dp(16)) }
+                setCompoundDrawablesRelative(icon, null, null, null)
+                setOnClickListener { showWarnings() }
+            }
+        placeColumn.addView(warningLink)
         location.addView(placeColumn, LinearLayout.LayoutParams(0, -2, 1f))
         currentWeather = CurrentWeatherHeader(this)
         location.addView(
@@ -748,23 +767,6 @@ class MainActivity : Activity() {
                 setOnClickListener { setPlaying(!playing) }
             }
         controls.addView(playButton, LinearLayout.LayoutParams(dp(48), dp(40)))
-        controls.addView(
-            label("NOW", 10f, Hud.cyan, true).apply {
-                tag = "radar-now"
-                gravity = Gravity.CENTER
-                contentDescription = "Jump to the current radar observation"
-                setOnClickListener {
-                    setPlaying(false)
-                    val data = sequence?.frames ?: return@setOnClickListener
-                    val index =
-                        data.indices.minByOrNull {
-                            abs(data[it].time - AppPlatform.now())
-                        } ?: return@setOnClickListener
-                    requestFrame(index)
-                }
-            },
-            LinearLayout.LayoutParams(dp(48), dp(40)),
-        )
         timeline =
             RadarTimeline(this).apply {
                 onSelect = {
@@ -782,7 +784,7 @@ class MainActivity : Activity() {
                 gravity = Gravity.CENTER
                 contentDescription = "Radar frame unavailable"
             }
-        controls.addView(radarTime, LinearLayout.LayoutParams(dp(92), dp(40)))
+        controls.addView(radarTime, LinearLayout.LayoutParams(dp(48), dp(40)))
         speedButton =
             label("1×", 11f, Hud.ink, true).apply {
                 tag = "radar-speed"
@@ -929,11 +931,7 @@ class MainActivity : Activity() {
     private fun updateRadarAccessibility() {
         val seq = sequence
         val frame = map.frame
-        radarTime.text =
-            frame?.let {
-                val time = Times.format(it.time, "HH:mm", repo.place.zone)
-                if (it.lead > 0) "$time +${it.lead}" else "$time OBS"
-            } ?: "—"
+        radarTime.text = frame?.let { Times.format(it.time, "HH:mm", repo.place.zone) } ?: "—"
         radarTime.contentDescription =
             frame?.let {
                 "Radar ${Times.format(it.time, "EEEE dd MMM yyyy HH:mm z", repo.place.zone)}, ${if (it.lead > 0) "forecast +${it.lead} minutes" else "observation"}"
@@ -1059,6 +1057,7 @@ class MainActivity : Activity() {
         if (value == Page.TODAY && page != Page.TODAY) hourlyView = null
         if (page == Page.TODAY || page == Page.WEEK) forecastOffsets[page] = forecastScroll.scrollY
         page = value
+        bindWarnings(AppPlatform.now())
         radarVisible = value == Page.RADAR
         radarPanel.visibility = if (radarVisible) View.VISIBLE else View.GONE
         forecastContainer.visibility =
@@ -1086,7 +1085,8 @@ class MainActivity : Activity() {
     private fun render() {
         repo.age()
         ensureSolar(repo.place, AppPlatform.now())
-        placeTitle.text = placeDisplayName(repo.place, repo.forecastPoint?.station)
+        bindPlaceTitle()
+        bindWarnings(AppPlatform.now())
         coordinates.text = coords(repo.place.lat, repo.place.lon)
         currentWeather.bind(
             repo.forecast.data?.current(AppPlatform.now()),
@@ -1114,6 +1114,7 @@ class MainActivity : Activity() {
         repo.connection()
         if (force || repo.forecast.needsRefresh(now, 30 * 60_000L)) repo.refreshForecast()
         if (force || radarVisible) repo.refreshRadar()
+        if (force && page == Page.TODAY) repo.refreshWarnings(now, force = true)
     }
 
     private fun choose(place: Place, persist: Boolean = true): Boolean {
@@ -1137,23 +1138,173 @@ class MainActivity : Activity() {
         return true
     }
 
+    private fun bindWarnings(now: Long) {
+        val warnings = if (page == Page.TODAY) repo.warnings(now) else emptyList()
+        if (warnings != visibleWarnings) {
+            warningDialog?.dismiss()
+            visibleWarnings = warnings
+        }
+        warningLink.visibility = if (warnings.isEmpty()) View.GONE else View.VISIBLE
+        if (page == Page.TODAY && started) repo.refreshWarnings(now)
+    }
+
+    private fun showWarnings() {
+        if (visibleWarnings.isEmpty()) return
+        val body = column().apply { setPadding(dp(20), dp(4), dp(20), dp(16)) }
+        val zone = repo.place.zone
+        for (warning in visibleWarnings) {
+            body.addView(label(warning.headline, 15f, Hud.amber))
+            body.space(6)
+            val start = Times.format(warning.starts, "dd.MM. HH:mm z", zone)
+            val end = Times.format(warning.expires, "dd.MM. HH:mm z", zone)
+            body.addView(label("$start – $end", 11f, Hud.muted, true))
+            for (message in
+                listOf(warning.description, warning.instruction).filter { it.isNotBlank() }) {
+                body.space(8)
+                body.addView(label(message, 14f))
+            }
+            body.space(18)
+        }
+        val credit =
+            listOf(getString(R.string.warning_source)) +
+                visibleWarnings.map { it.geometryCredit }.filter { it.isNotBlank() }.distinct()
+        body.addView(label(credit.joinToString("\n"), 10f, Hud.muted))
+        val dialog =
+            placeDialog(
+                AlertDialog.Builder(this).setView(ScrollView(this).apply { addView(body) }),
+                getString(R.string.weather_warnings),
+            )
+        dialog.setOnDismissListener { if (warningDialog === dialog) warningDialog = null }
+        warningDialog = dialog
+        dialog.show()
+    }
+
+    private fun bindPlaceTitle() {
+        val name = placeDisplayName(repo.place, repo.forecastPoint?.station)
+        val canSwitch = favourites.size > 1
+        placeTitle.text = name
+        placeTitle.contentDescription =
+            if (canSwitch) getString(R.string.switch_saved_place_description, name) else null
+        if (placeTitle.isClickable == canSwitch) return
+        placeTitle.isClickable = canSwitch
+        placeTitle.isFocusable = canSwitch
+        placeTitle.background =
+            if (canSwitch) panel(Hud.panel, Hud.line, dp(10).toFloat()) else null
+        val inset = if (canSwitch) dp(10) else 0
+        placeTitle.setPadding(inset, dp(3), inset, dp(3))
+        placeTitle.setCompoundDrawablesRelative(
+            null,
+            null,
+            if (canSwitch)
+                getDrawable(R.drawable.ic_chevron_down)?.apply {
+                    setBounds(0, 0, dp(16), dp(16))
+                }
+            else null,
+            null,
+        )
+    }
+
+    private fun switchSavedPlace() {
+        val choices = favourites
+        if (choices.size < 2) return
+        val selected = choices.indexOfFirst { it.lat == repo.place.lat && it.lon == repo.place.lon }
+        val token = placeChoices.invalidate()
+        val dialog =
+            placeDialog(
+                AlertDialog.Builder(this).setSingleChoiceItems(
+                    choices.map { placeDisplayName(it, null) }.toTypedArray(),
+                    selected,
+                ) { dialog, index ->
+                    if (!placeChoices.isCurrent(token)) return@setSingleChoiceItems
+                    val place = choices[index]
+                    if (place == repo.place) dialog.dismiss()
+                    else if (choose(place) && page == Page.PLACES) locations()
+                },
+                getString(R.string.saved_places),
+            )
+        placeChoices.track(dialog, token)
+        dialog.show()
+    }
+
     private fun locations() {
+        favourites = store.favourites()
+        bindPlaceTitle()
         val body = column().apply { setPadding(dp(20), dp(20), dp(20), 0) }
         placesScroll.removeAllViews()
         placesScroll.addView(body)
-        body.addView(action("SEARCH CITY") { placeChoices.searchCity() })
-        body.space(8)
-        body.addView(action("USE CURRENT LOCATION") { placeChoices.currentLocation() })
-        body.space(8)
-        body.addView(action("SAVE CURRENT AS FAVOURITE") { saveFavourite() })
-        body.space(22)
-        body.addView(label("FAVOURITES", 11f, Hud.cyan, true))
-        body.space(10)
-        val favourites = store.favourites()
+        fun iconButton(icon: Int, description: String, click: () -> Unit) =
+            ImageButton(this).apply {
+                setImageResource(icon)
+                contentDescription = description
+                if (android.os.Build.VERSION.SDK_INT >= 26) tooltipText = description
+                background = panel(Hud.panel, Hud.line, dp(12).toFloat())
+                pad(13)
+                setOnClickListener { click() }
+            }
+        val searchRow = row()
+        searchRow.addView(
+            action("SEARCH CITY") { placeChoices.searchCity() }
+                .apply {
+                    gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                    setPadding(dp(16), 0, dp(16), 0)
+                    compoundDrawablePadding = dp(12)
+                    setCompoundDrawablesRelative(
+                        getDrawable(R.drawable.ic_search)?.apply {
+                            setBounds(0, 0, dp(21), dp(21))
+                        },
+                        null,
+                        null,
+                        null,
+                    )
+                    background = panel(Hud.legend, Hud.line, dp(12).toFloat())
+                },
+            LinearLayout.LayoutParams(0, -2, 1f),
+        )
+        searchRow.addView(
+            iconButton(R.drawable.ic_location_crosshair, "USE CURRENT LOCATION") {
+                placeChoices.currentLocation()
+            },
+            LinearLayout.LayoutParams(dp(48), dp(48)).apply { leftMargin = dp(8) },
+        )
+        body.addView(searchRow)
+        body.space(16)
+        val section = row()
+        section.addView(
+            label("FAVOURITES", 11f, Hud.muted, true).apply {
+                letterSpacing = .12f
+            },
+            LinearLayout.LayoutParams(-2, -2),
+        )
+        section.addView(
+            View(this).apply { setBackgroundColor(Hud.line) },
+            LinearLayout.LayoutParams(0, dp(1), 1f).apply {
+                leftMargin = dp(12)
+                rightMargin = dp(12)
+            },
+        )
+        section.addView(
+            iconButton(R.drawable.ic_save_favourite, "SAVE CURRENT AS FAVOURITE") {
+                    saveFavourite()
+                }
+                .apply { background = null },
+            LinearLayout.LayoutParams(dp(48), dp(48)),
+        )
+        body.addView(section)
+        val list =
+            column().apply {
+                background = panel(Hud.panel, Hud.line, dp(12).toFloat())
+                pad(2)
+            }
+        body.addView(list)
         if (favourites.isEmpty())
-            body.addView(label("Saved places will appear here.", 13f, Hud.muted))
-        favourites.forEach { place ->
-            body.addView(
+            list.addView(label("Saved places will appear here.", 13f, Hud.muted).apply { pad(16) })
+        favourites.forEachIndexed { index, place ->
+            if (index > 0)
+                list.addView(
+                    View(this).apply { setBackgroundColor(Hud.line) },
+                    LinearLayout.LayoutParams(-1, dp(1)),
+                )
+            list.addView(
                 FavouriteCard(
                     this,
                     place,
@@ -1173,18 +1324,28 @@ class MainActivity : Activity() {
                     },
                 )
             )
-            if (place.geocodeId != null) body.addView(placeCreditView(place))
-            body.space(10)
         }
         body.space(12)
-        body.addView(action("CLEAR SEARCH CACHE") { placeChoices.clearCache() })
-        body.space(8)
-        body.addView(
-            action("DATA & LICENCES") {
-                placeChoices.invalidate()
-                notices()
-            }
-        )
+        val footer = row()
+        for ((title, click) in
+            listOf<Pair<String, () -> Unit>>(
+                "CLEAR SEARCH CACHE" to { placeChoices.clearCache() },
+                "DATA & LICENCES" to
+                    {
+                        placeChoices.invalidate()
+                        notices()
+                    },
+            )) {
+            footer.addView(
+                action(title, click = click).apply {
+                    background = null
+                    setTextColor(Hud.muted)
+                    textSize = 10f
+                },
+                LinearLayout.LayoutParams(0, -2, 1f),
+            )
+        }
+        body.addView(footer)
         body.space(16)
         body.addView(
             label("Drizziq ${BuildConfig.VERSION_NAME}", 11f, Hud.muted).apply {
@@ -1294,7 +1455,14 @@ class MainActivity : Activity() {
                     return@setOnClickListener
                 }
                 if (!placeChoices.isCurrent(token)) return@setOnClickListener
-                val place = repo.place.relabel(label)
+                val place =
+                    if (
+                        label == placeDisplayName(repo.place, repo.forecastPoint?.station) &&
+                            repo.place.geocodeId != null &&
+                            !repo.place.geocodeLabelEdited
+                    )
+                        repo.place.copy(label = label)
+                    else repo.place.relabel(label)
                 try {
                     store.save(place)
                 } catch (error: Exception) {
@@ -1306,9 +1474,10 @@ class MainActivity : Activity() {
                         .show()
                     return@setOnClickListener
                 }
-                if (!choose(place)) return@setOnClickListener
-                dialog.dismiss()
+                val selected = choose(place)
                 locations()
+                if (!selected) return@setOnClickListener
+                dialog.dismiss()
                 Toast.makeText(this, "Favourite saved", Toast.LENGTH_SHORT).show()
             }
         }
@@ -1333,6 +1502,7 @@ class MainActivity : Activity() {
     }
 
     override fun onStop() {
+        warningDialog?.dismiss()
         showRadarDetails(false)
         started = false
         stopped = true

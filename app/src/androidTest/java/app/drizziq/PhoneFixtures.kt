@@ -5,6 +5,7 @@ import android.content.ContextWrapper
 import android.content.SharedPreferences
 import android.content.res.AssetManager
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.HttpURLConnection
 import java.util.Collections
@@ -34,7 +35,7 @@ internal object PhoneFixtures {
             }
         }
 
-    fun install(base: Context, assets: AssetManager, preserve: Boolean) {
+    fun install(base: Context, assets: AssetManager, preserve: Boolean, showWarning: Boolean) {
         isolated = File(base.cacheDir, "phone-fixture")
         if (!preserve) {
             isolated.deleteRecursively()
@@ -69,11 +70,29 @@ internal object PhoneFixtures {
         tile.recycle()
         val png = output.toByteArray()
         seedRadar(context(base), assets)
+        val warnings =
+            ByteArrayOutputStream()
+                .also { bytes ->
+                    java.util.zip.ZipOutputStream(bytes).use { zip ->
+                        if (showWarning) {
+                            zip.putNextEntry(java.util.zip.ZipEntry("warning.xml"))
+                            assets.open("cap-munich-test.xml").use { it.copyTo(zip) }
+                            zip.closeEntry()
+                        }
+                    }
+                }
+                .toByteArray()
         AppPlatform.connections = { url ->
-            requests.incrementAndGet()
+            val warningRequest =
+                url.host == "opendata.dwd.de" && url.path == "/weather/${DwdWarnings.PATH}"
+            if (!warningRequest) requests.incrementAndGet()
             val bytes: ByteArray
             val status: Int
             when {
+                warningRequest -> {
+                    bytes = warnings
+                    status = 200
+                }
                 url.host == "tile.openstreetmap.org" -> {
                     bytes = png
                     status = 200

@@ -40,21 +40,25 @@ class FavouriteCard(
     init {
         orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        pad(12)
+        setPadding(context.dp(12), context.dp(8), context.dp(4), context.dp(8))
         isSelected = selected
         isClickable = true
         isFocusable = true
-        contentDescription = "Select favourite ${place.label}"
-        background =
-            panel(
-                if (selected) 0xFF102B35.toInt() else Hud.panel,
-                if (selected) Hud.cyan else Hud.line,
-                context.dp(16).toFloat(),
-            )
+        val name = placeDisplayName(place, null)
+        contentDescription = "Select favourite $name"
+        if (selected)
+            background = panel(0xFF102B35.toInt(), 0xFF102B35.toInt(), context.dp(10).toFloat())
         setOnClickListener { select() }
+        addView(
+            SvgIcon(context, "nav-places").apply {
+                tint = if (selected) Hud.cyan else Hud.muted
+                importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+            },
+            LayoutParams(context.dp(20), context.dp(20)).apply { rightMargin = context.dp(12) },
+        )
 
         val content = context.column()
-        content.addView(context.label(place.label, 17f))
+        content.addView(context.label(name, 17f, if (selected) Hud.cyan else Hud.ink))
         content.space(4)
         content.addView(
             context.label(formatCoordinates(place.lat, place.lon), 10f, Hud.muted, true)
@@ -66,8 +70,8 @@ class FavouriteCard(
                 tag = "favourite-delete"
                 isClickable = true
                 isFocusable = true
-                contentDescription = "Delete favourite ${place.label}"
-                background = panel(Hud.bg, Hud.line, context.dp(10).toFloat())
+                contentDescription = "Delete favourite $name"
+
                 addView(
                     SvgIcon(context, "delete").apply {
                         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -78,7 +82,7 @@ class FavouriteCard(
             }
         addView(
             deleteButton,
-            LayoutParams(context.dp(42), context.dp(42)).apply { leftMargin = context.dp(12) },
+            LayoutParams(context.dp(48), context.dp(48)).apply { leftMargin = context.dp(12) },
         )
     }
 }

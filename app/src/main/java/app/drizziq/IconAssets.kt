@@ -4,6 +4,7 @@ package app.drizziq
 object IconAssets {
     fun resource(name: String): Int =
         when (name) {
+            "chevron-down" -> R.drawable.ic_chevron_down
             "close" -> R.drawable.ic_close
             "delete" -> R.drawable.ic_delete
             "info" -> R.drawable.ic_info
@@ -30,8 +31,11 @@ object IconAssets {
             "pause" -> R.drawable.ic_pause
             "play" -> R.drawable.ic_play
             "refresh" -> R.drawable.ic_refresh
+            "save-favourite" -> R.drawable.ic_save_favourite
+            "search" -> R.drawable.ic_search
             "sunrise" -> R.drawable.ic_sunrise
             "sunset" -> R.drawable.ic_sunset
+            "warning" -> R.drawable.ic_warning
             "weather-cloudy" -> R.drawable.ic_weather_cloudy
             "weather-drizzle" -> R.drawable.ic_weather_drizzle
             "weather-drizzle-heavy" -> R.drawable.ic_weather_drizzle_heavy

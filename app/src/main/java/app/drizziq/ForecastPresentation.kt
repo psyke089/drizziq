@@ -37,6 +37,7 @@ fun hourlyColumns(
 fun placeDisplayName(place: Place, station: Station?): String =
     if (place.label == "Current location")
         station?.name ?: String.format(Locale.US, "%.4f°, %.4f°", place.lat, place.lon)
+    else if (place.geocodeId != null && !place.geocodeLabelEdited) place.label.substringBefore(", ")
     else place.label
 
 /** First column of each subsequent local date, including DST and fractional-offset zones. */

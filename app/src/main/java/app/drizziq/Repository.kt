@@ -279,6 +279,63 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
         }
     }
     private val generation = RequestGeneration()
+
+    private data class WarningSnapshot(
+        val place: Place,
+        val warnings: List<DwdWarning>,
+        val fetched: Long,
+    )
+
+    private var warningSnapshot: WarningSnapshot? = null
+    private var warningRequest: Pair<Place, Long>? = null
+    private var warningBusy = false
+    // Access the nationwide archive only on the serial warning worker.
+    private val warningWorker = Executors.newSingleThreadExecutor()
+    private var warningArchive: Pair<ByteArray, Long>? = null
+
+    internal fun warnings(now: Long): List<DwdWarning> =
+        warningSnapshot
+            ?.takeIf {
+                it.place == place && now - it.fetched in 0..15 * 60_000L
+            }
+            ?.warnings
+            .orEmpty()
+            .filter { now < it.expires }
+
+    internal fun refreshWarnings(now: Long, force: Boolean = false) {
+        if (!online || warningBusy || closed.get()) return
+        val selected = place
+        if (
+            !force &&
+                warningRequest?.let {
+                    it.first == selected && now - it.second in 0 until 5 * 60_000L
+                } == true
+        )
+            return
+        warningRequest = selected to now
+        warningBusy = true
+        warningWorker.execute {
+            val result = runCatching {
+                val (bytes, fetched) =
+                    warningArchive?.takeIf {
+                        !force && now - it.second in 0 until 5 * 60_000L
+                    }
+                        ?: (Http.bytes(
+                            Http.WEATHER + DwdWarnings.PATH,
+                            DwdWarnings.DOWNLOAD_LIMIT,
+                        ) to AppPlatform.now())
+                val alerts = DwdWarnings.at(bytes, selected, AppPlatform.now())
+                warningArchive = bytes to fetched
+                WarningSnapshot(selected, alerts, fetched)
+            }
+            post {
+                warningBusy = false
+                if (place == selected) result.getOrNull()?.let { warningSnapshot = it }
+                changed()
+            }
+        }
+    }
+
     private var radarBusy = false
     private val radarWorker = Executors.newSingleThreadExecutor()
     private val radarGeneration = RequestGeneration()
@@ -703,6 +760,7 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
         closed.set(true)
         synchronized(frameBitmaps) { frameBitmaps.clear() }
         workers.shutdownNow()
+        warningWorker.shutdownNow()
         radarGeneration.next()
         radarWorker.shutdownNow()
         handler.removeCallbacksAndMessages(null)

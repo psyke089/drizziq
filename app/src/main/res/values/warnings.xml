@@ -1,0 +1,4 @@
+<resources>
+    <string name="weather_warnings">Warnungen</string>
+    <string name="warning_source">Quelle: Deutscher Wetterdienst (CC BY 4.0)</string>
+</resources>

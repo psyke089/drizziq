@@ -100,8 +100,9 @@ class GeocodingTest {
     }
 
     @Test
-    fun place_zoneFallbackAndLabelTruncation_preserveProvenanceWithoutSurrogateSplits() {
+    fun place_zoneFallbackAndCityName_preserveProvenance() {
         val p = candidate.toPlace { _, _ -> error("Should not need fallback") }!!
+        assertEquals(candidate.name, p.label)
         assertEquals("open-meteo:2950159", p.geocodeId)
         assertEquals(candidate.lat, p.lat, 0.0)
         assertEquals(
@@ -109,7 +110,7 @@ class GeocodingTest {
             candidate.copy(timezone = "invalid").toPlace { _, _ -> "Pacific/Auckland" }!!.zone,
         )
         assertNull(candidate.copy(timezone = null).toPlace { _, _ -> "invalid" })
-        val long = candidate.copy(name = "X".repeat(59) + "😀", admin1 = null, country = null).label
+        val long = compactPlaceLabel("X".repeat(59) + "😀")
         assertEquals(59, long.length)
         assertFalse(Character.isHighSurrogate(long.last()))
         assertNotEquals(candidate.fullLabel, candidate.copy(admin1 = "Other region").fullLabel)

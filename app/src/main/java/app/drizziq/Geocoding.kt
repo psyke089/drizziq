@@ -31,7 +31,7 @@ data class GeocodeCandidate(
         get() = listOfNotNull(name, admin1, country ?: countryCode).distinct().joinToString(", ")
 
     val label
-        get() = compactPlaceLabel(fullLabel)
+        get() = name
 
     fun toPlace(offline: (Double, Double) -> String?): Place? {
         val zone = Geocoding.zone(timezone, lat, lon, offline) ?: return null

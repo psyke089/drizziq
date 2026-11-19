@@ -19,6 +19,7 @@ class PhoneExercise : Instrumentation() {
             "forecast",
             "radar",
             "places-search",
+            "saved-place-switcher",
             "viewport-save",
             "viewport-restore",
         )
@@ -53,7 +54,12 @@ class PhoneExercise : Instrumentation() {
         phase = arguments?.getString("phase") ?: "main"
         fixture = arguments?.getString("fixture") == "true"
         if (fixture)
-            PhoneFixtures.install(targetContext, context.assets, phase == "viewport-restore")
+            PhoneFixtures.install(
+                targetContext,
+                context.assets,
+                phase == "viewport-restore",
+                phase == "saved-place-switcher",
+            )
         else AppPlatform.reset()
         start()
     }
@@ -1290,6 +1296,60 @@ class PhoneExercise : Instrumentation() {
                         )
                     }
                 }
+                "saved-place-switcher" -> {
+                    check(fixture) { "saved-place-switcher requires isolated fixtures" }
+                    val store = PlaceStore(appContext)
+                    val munich = Place.MUNICH.copy(geocodeId = "open-meteo:2867714")
+                    val berlin = Place("Berlin", 52.52, 13.405)
+                    store.save(munich)
+                    click("Places")
+                    check(!has("switch saved place")) {
+                        "Switcher appeared with only one favourite"
+                    }
+                    check(!has("Place names")) { "Search credit appeared under favourites" }
+                    store.save(berlin)
+                    click("Today")
+                    click("Places")
+                    click("Today")
+                    waitFor("Munich forecast and warning") {
+                        has("Hourly forecast timeline") && has("Warnungen")
+                    }
+                    click("Warnungen")
+                    waitFor("warning details") {
+                        has("Fixture wind warning") &&
+                            has("Secure loose items") &&
+                            has("Deutscher Wetterdienst")
+                    }
+                    click("Close dialog")
+                    click("Munich, switch saved place")
+                    waitFor("saved places overlay") { has("Saved places") }
+                    check(has("Munich") && has("Berlin"))
+                    click("Close dialog")
+                    check(store.selected() == Place.MUNICH)
+                    click("Munich, switch saved place")
+                    click("Berlin")
+                    waitFor("switched city") {
+                        store.selected() == berlin &&
+                            has("Berlin, switch saved place") &&
+                            !has("Saved places") &&
+                            !has("Warnungen") &&
+                            nodes().any {
+                                it.contentDescription?.toString() == "Today" && it.isSelected
+                            }
+                    }
+                    click("Places")
+                    click("Delete favourite Munich")
+                    check(!has("switch saved place")) {
+                        "Switcher remained with only one favourite"
+                    }
+                    click("SEARCH CITY")
+                    check(has("Open-Meteo") && has("GeoNames"))
+                    click("Close dialog")
+                    result.putString(
+                        "checks",
+                        "multiple saved places open and switch from the header; dismissal preserves selection; source credit stays in search",
+                    )
+                }
                 "places-integration" -> {
                     val prefs = appContext.getSharedPreferences("places", 0)
                     val camera = appContext.getSharedPreferences("radar-viewport", 0)
@@ -1317,6 +1377,7 @@ class PhoneExercise : Instrumentation() {
                                     ?.startsWith("Select city result ") == true
                             }
                         }
+                        check(has("Open-Meteo") && has("GeoNames"))
                         val candidate =
                             nodes()
                                 .first {
@@ -1345,7 +1406,6 @@ class PhoneExercise : Instrumentation() {
                         }
                         check(selected.zone in java.util.TimeZone.getAvailableIDs())
                         waitFor("nearest forecast distance", 90000) { has("km away") }
-                        check(has("Open-Meteo") && has("GeoNames"))
                         click("Places")
                         click("SAVE CURRENT AS FAVOURITE")
                         enter("FAVOURITE LABEL", "Geocoding integration snapshot")
@@ -1739,9 +1799,7 @@ class PhoneExercise : Instrumentation() {
                                     "radar-time"
                                 )
                             val shown = cached.frames.last()
-                            val expected =
-                                Times.format(shown.time, "HH:mm", repo.place.zone) +
-                                    if (shown.lead > 0) " +${shown.lead}" else " OBS"
+                            val expected = Times.format(shown.time, "HH:mm", repo.place.zone)
                             check(time.text.toString() == expected)
                         }
                         click("Clear radar cache")

@@ -222,6 +222,14 @@ class ForecastPresentationTest {
     }
 
     @Test
+    fun placeDisplayName_shortensLegacySearchLabelsButKeepsCustomNames() {
+        val old =
+            Place.MUNICH.copy(label = "München, Bayern, Deutschland", geocodeId = "open-meteo:1")
+        assertEquals("München", placeDisplayName(old, null))
+        assertEquals("Home, Munich", placeDisplayName(old.relabel("Home, Munich"), null))
+    }
+
+    @Test
     fun placeDisplayName_deviceSnapshot_usesResolvedStationWithoutRenamingFavourite() {
         val device = Place("Current location", 48.1, 11.5)
         assertEquals("MUENCHEN STADT", placeDisplayName(device, station))
