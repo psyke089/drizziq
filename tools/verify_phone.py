@@ -160,7 +160,8 @@ def main():
                     "shared_prefs/phone-fixture-places.xml", "shared_prefs/phone-fixture-places.xml.bak",
                     "shared_prefs/phone-fixture-radar-viewport.xml", "shared_prefs/phone-fixture-radar-viewport.xml.bak",
                     "shared_prefs/phone-fixture-radar-test.xml", "shared_prefs/phone-fixture-radar-test.xml.bak",
-                    "shared_prefs/phone-fixture-location-permission.xml", "shared_prefs/phone-fixture-location-permission.xml.bak")
+                    "shared_prefs/phone-fixture-location-permission.xml", "shared_prefs/phone-fixture-location-permission.xml.bak",
+                    "shared_prefs/phone-fixture-forecast-options.xml", "shared_prefs/phone-fixture-forecast-options.xml.bak")
         except Exception as error:
             failures.append(f"fixture cleanup: {error}")
         # Instrumentation can leave the launcher in front. Return to the app explicitly.

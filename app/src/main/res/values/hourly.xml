@@ -1,0 +1,7 @@
+<resources>
+    <string name="hourly_past">past</string>
+    <string name="hourly_show_past">Show past hours</string>
+    <string name="hourly_refresh">Refresh DWD forecast</string>
+    <string name="hourly_refreshing">Refreshing DWD forecast</string>
+    <string name="hourly_setting_failed">Setting could not be saved</string>
+</resources>

@@ -29,6 +29,7 @@ object IconAssets {
             "nav-week" -> R.drawable.ic_nav_week
             "pause" -> R.drawable.ic_pause
             "play" -> R.drawable.ic_play
+            "refresh" -> R.drawable.ic_refresh
             "sunrise" -> R.drawable.ic_sunrise
             "sunset" -> R.drawable.ic_sunset
             "weather-cloudy" -> R.drawable.ic_weather_cloudy

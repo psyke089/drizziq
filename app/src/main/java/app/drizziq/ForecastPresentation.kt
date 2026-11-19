@@ -8,7 +8,12 @@ data class HourlyColumn(val time: Long, val hour: Hour?)
 fun currentHourColumn(columns: List<HourlyColumn>, now: Long): Int =
     columns.indexOfLast { it.time <= now }.coerceAtLeast(0)
 
-fun hourlyColumns(forecast: Forecast, now: Long, zone: String): List<HourlyColumn> {
+fun hourlyColumns(
+    forecast: Forecast,
+    now: Long,
+    zone: String,
+    showPast: Boolean = true,
+): List<HourlyColumn> {
     val tz = java.time.ZoneId.of(zone)
     val date = java.time.Instant.ofEpochMilli(now).atZone(tz).toLocalDate()
     val start = date.atStartOfDay(tz).toInstant().toEpochMilli()
@@ -24,7 +29,8 @@ fun hourlyColumns(forecast: Forecast, now: Long, zone: String): List<HourlyColum
     (forecast.earlier + forecast.hours)
         .filter { it.time in start..end }
         .forEach { times += it.time }
-    return times.map { HourlyColumn(it, byTime[it]) }
+    val columns = times.map { HourlyColumn(it, byTime[it]) }
+    return if (showPast) columns else columns.drop(currentHourColumn(columns, now))
 }
 
 /** Device snapshots use the resolved forecast-point name; user labels keep their meaning. */
@@ -32,3 +38,9 @@ fun placeDisplayName(place: Place, station: Station?): String =
     if (place.label == "Current location")
         station?.name ?: String.format(Locale.US, "%.4f°, %.4f°", place.lat, place.lon)
     else place.label
+
+/** First column of each subsequent local date, including DST and fractional-offset zones. */
+fun hourlyDayBoundaries(columns: List<HourlyColumn>, zone: String): List<Int> =
+    (1 until columns.size).filter {
+        Times.day(columns[it - 1].time, zone) != Times.day(columns[it].time, zone)
+    }

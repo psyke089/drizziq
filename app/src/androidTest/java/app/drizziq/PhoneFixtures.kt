@@ -39,7 +39,13 @@ internal object PhoneFixtures {
         if (!preserve) {
             isolated.deleteRecursively()
             for (name in
-                listOf("places", "radar-viewport", "viewport-exercise", "location-permission")) {
+                listOf(
+                    "places",
+                    "radar-viewport",
+                    "viewport-exercise",
+                    "location-permission",
+                    "forecast-options",
+                )) {
                 base.getSharedPreferences("phone-fixture-$name", 0).edit().clear().commit()
             }
         }

@@ -17,7 +17,7 @@ Native Kotlin for Android 7.0+, one dark HUD, no cloud account. Station selectio
 
 <p align="center"><img src="docs/screenshot.png" alt="Today view with hourly forecast" width="300"></p>
 
-The selected place's civil day from midnight through noon tomorrow: hourly temperature, precipitation, wind and gusts from the nearest bundled DWD MOSMIX station within 50 km, whose distance is shown. Sun times are computed on device and work offline. Hours before the latest issue are filled from the preceding issue and stay forecasts, not observations; fields DWD does not supply stay unknown. A stale or failed refresh never silently replaces good data — cached readings are labelled and kept.
+The selected place's civil day from midnight through noon tomorrow: hourly temperature, precipitation, wind and gusts from the nearest bundled DWD MOSMIX station within 50 km; station details and distance are shown in Week. The table starts at the current hour; enable `past` to include earlier hours (the choice is saved). The date follows horizontal scrolling, a line marks the next day, and the refresh icon reloads DWD data. Sun times are computed on device and work offline. Hours before the latest issue are filled from the preceding issue and stay forecasts, not observations; fields DWD does not supply stay unknown. A stale or failed refresh never silently replaces good data — cached readings are labelled and kept.
 
 ## Week
 

@@ -650,25 +650,32 @@ class PhoneExercise : Instrumentation() {
                         views(activity.window.decorView)
                             .filterIsInstance<android.widget.HorizontalScrollView>()
                             .first()
-                    fun refresh(): android.widget.Button =
-                        views(activity.window.decorView.findViewWithTag("forecast-details"))
-                            .filterIsInstance<android.widget.Button>()
-                            .first()
+                    val repo =
+                        MainActivity::class
+                            .java
+                            .getDeclaredField("repo")
+                            .apply { isAccessible = true }
+                            .get(activity) as Repository
                     click("Week")
                     click("Today")
                     waitFor("hourly table") {
                         has("Temperature ") && has("Hourly forecast timeline")
                     }
-                    waitFor("initial hour scroll") {
+                    waitFor("initial current hour") {
                         var positioned = false
                         runOnMainSync {
+                            val first =
+                                activity.window.decorView.findViewWithTag<android.widget.TextView>(
+                                    "hour-time:0"
+                                )
                             positioned =
-                                timeline().scrollX > 0 ||
-                                    Times.format(
-                                        AppPlatform.now(),
-                                        "HH",
-                                        PlaceStore(appContext).selected().zone,
-                                    ) == "00"
+                                timeline().scrollX == 0 &&
+                                    first?.text?.toString() ==
+                                        Times.format(
+                                            AppPlatform.now(),
+                                            "HH:00",
+                                            PlaceStore(appContext).selected().zone,
+                                        )
                         }
                         positioned
                     }
@@ -681,7 +688,7 @@ class PhoneExercise : Instrumentation() {
                     check(has(date) && !has("HOURLY FORECAST") && !has("00:00–24:00"))
                     waitFor("ready to refresh", 30000) {
                         var ready = false
-                        runOnMainSync { ready = refresh().isEnabled }
+                        runOnMainSync { ready = !repo.forecast.refreshing }
                         ready
                     }
                     var offset = 0
@@ -693,20 +700,113 @@ class PhoneExercise : Instrumentation() {
                         }
                         timeline().scrollTo(appContext.dp(112), 0)
                         offset = timeline().scrollX
-                        refresh().performClick()
+                        activity.window.decorView
+                            .findViewWithTag<android.widget.ImageButton>("forecast-refresh")
+                            .performClick()
                     }
                     waitFor("refresh complete", 30000) {
                         var ready = false
-                        runOnMainSync { ready = refresh().isEnabled && timeline().width > 0 }
+                        runOnMainSync { ready = !repo.forecast.refreshing && timeline().width > 0 }
                         ready
                     }
                     waitForIdleSync()
                     runOnMainSync {
                         check(timeline().scrollX == offset) { "Refresh moved the hourly table" }
                     }
+                    fun firstTime() =
+                        activity.window.decorView.findViewWithTag<android.widget.TextView>(
+                            "hour-time:0"
+                        )
+                    runOnMainSync {
+                        timeline().scrollTo(0, 0)
+                        activity.window.decorView
+                            .findViewWithTag<android.widget.CheckBox>("hourly-past")
+                            .performClick()
+                    }
+                    waitFor("past hours included") {
+                        var included = false
+                        runOnMainSync { included = firstTime()?.text?.toString() == "00:00" }
+                        included
+                    }
+                    val zone = PlaceStore(appContext).selected().zone
+                    val tomorrow =
+                        java.time.Instant.ofEpochMilli(AppPlatform.now())
+                            .atZone(java.time.ZoneId.of(zone))
+                            .toLocalDate()
+                            .plusDays(1)
+                    val nextDate =
+                        Times.format(
+                            tomorrow
+                                .atStartOfDay(java.time.ZoneId.of(zone))
+                                .toInstant()
+                                .toEpochMilli(),
+                            "EEEE, dd MMM yyyy",
+                            zone,
+                        )
+                    runOnMainSync {
+                        val midnight =
+                            views(activity.window.decorView)
+                                .filterIsInstance<android.widget.TextView>()
+                                .first {
+                                    it.tag?.toString()?.startsWith("hour-time:") == true &&
+                                        it.contentDescription
+                                            ?.toString()
+                                            ?.startsWith(
+                                                Times.format(
+                                                    tomorrow
+                                                        .atStartOfDay(java.time.ZoneId.of(zone))
+                                                        .toInstant()
+                                                        .toEpochMilli(),
+                                                    "EEEE dd MMM",
+                                                    zone,
+                                                )
+                                            ) == true
+                                }
+                        check(midnight.text.toString() == "00:00") {
+                            "Midnight still includes a date subtitle"
+                        }
+                        timeline().scrollTo(midnight.left, 0)
+                    }
+                    waitFor("heading follows next day") { has(nextDate) }
+                    runOnMainSync { timeline().scrollTo(0, 0) }
+                    waitFor("heading returns to today") { has(date) }
+                    val monitor = addMonitor(MainActivity::class.java.name, null, false)
+                    try {
+                        runOnMainSync { activity.recreate() }
+                        val recreated = requireNotNull(waitForMonitorWithTimeout(monitor, 10000))
+                        waitFor("past preference survives recreation") {
+                            var saved = false
+                            runOnMainSync {
+                                saved =
+                                    recreated.window.decorView
+                                        .findViewWithTag<android.widget.CheckBox>("hourly-past")
+                                        ?.isChecked == true
+                            }
+                            saved
+                        }
+                        runOnMainSync {
+                            recreated.window.decorView
+                                .findViewWithTag<android.widget.CheckBox>("hourly-past")
+                                .performClick()
+                        }
+                        waitFor("past hours hidden again") {
+                            var hidden = false
+                            runOnMainSync {
+                                hidden =
+                                    recreated.window.decorView
+                                        .findViewWithTag<android.widget.TextView>("hour-time:0")
+                                        ?.text
+                                        ?.toString() ==
+                                        Times.format(AppPlatform.now(), "HH:00", zone)
+                            }
+                            hidden
+                        }
+                    } finally {
+                        removeMonitor(monitor)
+                    }
                     result.putString(
                         "checks",
-                        "opens at current hour; date heading; right edge; horizontal offset retained through refresh",
+                        "current hour first; refresh icon preserves horizontal offset; past toggle persists across recreation; date follows scrolling; midnight has no date subtitle",
                     )
                 }
                 "day-forecast" -> {
@@ -755,39 +855,26 @@ class PhoneExercise : Instrumentation() {
                     waitFor("calculated sunrise and sunset", 10000) {
                         has("Sunrise ") && has("Sunset ")
                     }
-                    waitFor("stable forecast details", 90000) {
-                        var ready = false
-                        runOnMainSync {
-                            val card =
-                                activity.window.decorView.findViewWithTag<android.view.View>(
-                                    "forecast-details"
-                                )
-                            ready =
-                                card != null &&
-                                    views(card).filterIsInstance<android.widget.Button>().any {
-                                        it.text.toString() == "REFRESH DWD" && it.isEnabled
-                                    }
-                        }
-                        ready
-                    }
-                    val today = cardTexts()
-                    check(today.isNotEmpty() && today.none { it.contains("DATA TRANSMISSION") })
-                    check(today.any { it == "Timezone" } && today.any { it == "Last updated" })
-                    check(today.none { it in listOf("Issue", "Valid", "Received") })
+                    check(cardTexts().isEmpty()) { "Station details belong only to Week" }
                     click("Week")
                     waitFor("week table") {
                         has("Maximum temperature") && has("Minimum temperature")
                     }
-                    check(today == cardTexts()) {
-                        "Forecast details must be identical in Today and Week"
-                    }
+                    val details = cardTexts()
+                    check(details.isNotEmpty() && details.none { it.contains("DATA TRANSMISSION") })
+                    check(details.any { it == "Timezone" } && details.any { it == "Last updated" })
+                    check(
+                        details.none {
+                            it in listOf("Issue", "Valid", "Received", "REFRESH DWD", "REFRESHING…")
+                        }
+                    )
                     check(!has("Sunrise ") && !has("Sunset ")) {
                         "Solar card belongs only to Today"
                     }
                     click("Today")
                     result.putString(
                         "checks",
-                        "local-midnight through tomorrow-noon columns; precipitation probability and gust rows; local sunrise/sunset card; identical formatted details in Today/Week without DATA TRANSMISSION",
+                        "local-midnight through tomorrow-noon columns; precipitation probability and gust rows; local sunrise/sunset card; station details only in Week without DATA TRANSMISSION",
                     )
                 }
                 "header-weather" -> {
@@ -844,15 +931,16 @@ class PhoneExercise : Instrumentation() {
                     )
                 }
                 "forecast-status" -> {
-                    fun views(root: android.view.View): List<android.view.View> =
-                        listOf(root) +
-                            if (root is android.view.ViewGroup)
-                                (0 until root.childCount).flatMap { views(root.getChildAt(it)) }
-                            else emptyList()
+                    val repo =
+                        MainActivity::class
+                            .java
+                            .getDeclaredField("repo")
+                            .apply { isAccessible = true }
+                            .get(activity) as Repository
                     fun tagged(tag: String): android.view.View? =
                         activity.window.decorView.findViewWithTag(tag)
                     fun anchor(page: String): android.view.View =
-                        tagged(if (page == "Week") "week-row:0" else "today-date")
+                        tagged(if (page == "Week") "week-row:0" else "today-heading")
                             ?: error("Missing $page anchor")
                     fun firstChild(tag: String): android.view.View? =
                         (tagged("forecast-body") as? android.view.ViewGroup)
@@ -860,7 +948,7 @@ class PhoneExercise : Instrumentation() {
                             ?.takeIf { it.tag == tag }
                     for (page in listOf("Today", "Week")) {
                         click(page)
-                        val tag = if (page == "Week") "week-row:0" else "today-date"
+                        val tag = if (page == "Week") "week-row:0" else "today-heading"
                         waitFor("forecast ready to refresh") {
                             var ready = false
                             runOnMainSync {
@@ -868,9 +956,7 @@ class PhoneExercise : Instrumentation() {
                                 ready =
                                     body != null &&
                                         tagged(tag)?.isShown == true &&
-                                        views(body).filterIsInstance<android.widget.Button>().any {
-                                            it.text.toString() == "REFRESH DWD" && it.isEnabled
-                                        }
+                                        !repo.forecast.refreshing
                             }
                             ready
                         }
@@ -887,10 +973,7 @@ class PhoneExercise : Instrumentation() {
                             check(firstChild(tag) === anchorView) {
                                 "Status banner inserted above $page content before refresh"
                             }
-                            views(tagged("forecast-body")!!)
-                                .filterIsInstance<android.widget.Button>()
-                                .first { it.text.toString() == "REFRESH DWD" }
-                                .performClick()
+                            repo.refreshForecast()
                         }
                         var bannerAbsent = false
                         runOnMainSync {
@@ -906,7 +989,8 @@ class PhoneExercise : Instrumentation() {
                                 val anchorView = firstChild(tag)
                                 val box = Rect()
                                 measured =
-                                    anchorView != null &&
+                                    !repo.forecast.refreshing &&
+                                        anchorView != null &&
                                         anchorView.height > 0 &&
                                         anchorView.getGlobalVisibleRect(box)
                             }

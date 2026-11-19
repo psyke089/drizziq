@@ -7,13 +7,12 @@ import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 
-/** One shared, source-backed details layout for Today and Week. */
+/** Source-backed station and forecast details for Week. */
 @SuppressLint("ViewConstructor") // Programmatic card requires an actual forecast; no XML inflation.
 class ForecastDetailsCard(
     context: Context,
     reading: Reading<Forecast>,
     place: Place,
-    refresh: () -> Unit,
 ) : LinearLayout(context) {
     init {
         tag = "forecast-details"
@@ -129,12 +128,6 @@ class ForecastDetailsCard(
         }
         info(context.hudString(R.string.details_timezone), place.zone)
         reading.fetched?.let { info(context.hudString(R.string.details_updated), time(it)) }
-        space(3)
-        addView(
-            context
-                .action(if (reading.refreshing) "REFRESHING…" else "REFRESH DWD") { refresh() }
-                .apply { isEnabled = !reading.refreshing }
-        )
         contentDescription = context.hudString(R.string.details_accessibility, reading.state.name)
     }
 }

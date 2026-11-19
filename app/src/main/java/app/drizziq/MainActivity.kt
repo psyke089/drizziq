@@ -39,7 +39,14 @@ class MainActivity : Activity() {
     private var progressSubscription: Cancel? = null
     private val forecastOffsets = mutableMapOf<Page, Int>()
     private var hourlyView: HourlyForecast? = null
-    private var hourlyKey: Pair<Place, String>? = null
+    private var hourlyKey: Triple<Place, String, Long?>? = null
+    private val forecastPreferences by lazy {
+        getSharedPreferences("forecast-options", MODE_PRIVATE)
+    }
+    private val showPast: Boolean
+        get() = forecastPreferences.getBoolean("show-past", false)
+
+    private var lastForecastHour: Long? = null
 
     private enum class Page {
         TODAY,
@@ -367,7 +374,12 @@ class MainActivity : Activity() {
         val place = repo.place
         val state = data.state
         val now = AppPlatform.now()
-        val key = place to Times.day(now, place.zone)
+        val key =
+            Triple(
+                place,
+                Times.day(now, place.zone),
+                if (showPast) null else Math.floorDiv(now, 3600000L),
+            )
         val hourlyOffset = hourlyView?.takeIf { hourlyKey == key }?.timelineOffset
         hourlyView = null
         hourlyKey = key
@@ -384,6 +396,7 @@ class MainActivity : Activity() {
         weekHeader.visibility =
             if (page == Page.WEEK && forecast != null) View.VISIBLE else View.GONE
         lastForecastDay = Times.day(now, place.zone)
+        lastForecastHour = Math.floorDiv(now, 3600000L)
         sunriseCard = null
         ensureSolar(place, now)
         if (forecast == null) {
@@ -432,18 +445,19 @@ class MainActivity : Activity() {
         if (page != Page.WEEK) buildHourly(body, forecast, place, now, hourlyOffset)
         else buildWeek(body, forecast, place, now)
         if (page != Page.WEEK) {
-            body.space(16)
+            body.space(4)
             addSunriseCard(body, place)
+        } else {
+            body.space(16)
+            body.addView(
+                ForecastDetailsCard(this, data, place),
+                LinearLayout.LayoutParams(-1, -2).apply {
+                    leftMargin = dp(20)
+                    rightMargin = dp(20)
+                },
+            )
         }
-        body.space(16)
-        body.addView(
-            ForecastDetailsCard(this, data, place) { refresh() },
-            LinearLayout.LayoutParams(-1, -2).apply {
-                leftMargin = dp(20)
-                rightMargin = dp(20)
-            },
-        )
-        body.space(12)
+        body.space(if (page == Page.WEEK) 12 else 4)
         forecastScroll.post { forecastScroll.scrollTo(0, scroll) }
     }
 
@@ -488,14 +502,64 @@ class MainActivity : Activity() {
         now: Long,
         offset: Int?,
     ) {
-        val columns = hourlyColumns(forecast, now, place.zone)
-        body.addView(
+        val columns = hourlyColumns(forecast, now, place.zone, showPast)
+        val heading =
+            row().apply {
+                tag = "today-heading"
+                setPadding(dp(20), 0, dp(12), 0)
+            }
+        val date =
             label(Times.format(now, "EEEE, dd MMM yyyy", place.zone), 12f, Hud.cyan, true).apply {
                 tag = "today-date"
-                setPadding(dp(20), 0, dp(20), 0)
+                maxLines = 2
             }
-        )
-        body.space(12)
+        heading.addView(date, LinearLayout.LayoutParams(0, -2, 1f))
+        val past =
+            CheckBox(this).apply {
+                tag = "hourly-past"
+                setText(R.string.hourly_past)
+                contentDescription = getString(R.string.hourly_show_past)
+                textSize = 10f
+                typeface = Typeface.create("monospace", Typeface.NORMAL)
+                setTextColor(Hud.muted)
+                buttonTintList = ColorStateList.valueOf(Hud.cyan)
+                minimumHeight = 0
+                minimumWidth = 0
+                setPadding(0, 0, dp(8), 0)
+                isChecked = showPast
+                setOnCheckedChangeListener { _, checked ->
+                    if (forecastPreferences.edit().putBoolean("show-past", checked).commit()) {
+                        hourlyKey = null
+                        buildForecast(0)
+                    } else {
+                        Toast.makeText(
+                                this@MainActivity,
+                                R.string.hourly_setting_failed,
+                                Toast.LENGTH_SHORT,
+                            )
+                            .show()
+                        isChecked = showPast
+                    }
+                }
+            }
+        heading.addView(past, LinearLayout.LayoutParams(-2, dp(40)))
+        val refresh =
+            ImageButton(this).apply {
+                tag = "forecast-refresh"
+                setImageResource(R.drawable.ic_refresh)
+                contentDescription =
+                    getString(
+                        if (repo.forecast.refreshing) R.string.hourly_refreshing
+                        else R.string.hourly_refresh
+                    )
+                isEnabled = !repo.forecast.refreshing
+                alpha = if (isEnabled) 1f else .4f
+                background = null
+                pad(8)
+                setOnClickListener { refresh() }
+            }
+        heading.addView(refresh, LinearLayout.LayoutParams(dp(40), dp(40)))
+        body.addView(heading)
         if (columns.isEmpty()) body.addView(label("No hourly forecast for today", 13f, Hud.muted))
         else {
             hourlyView =
@@ -504,7 +568,9 @@ class MainActivity : Activity() {
                     columns,
                     place.zone,
                     offset ?: dp(56) * currentHourColumn(columns, now),
-                )
+                ) { time ->
+                    date.text = Times.format(time, "EEEE, dd MMM yyyy", place.zone)
+                }
             body.addView(hourlyView, LinearLayout.LayoutParams(-1, -2))
         }
     }
@@ -1030,7 +1096,10 @@ class MainActivity : Activity() {
         if (
             forecastVersion != repo.forecast ||
                 lastForecastPlace != repo.place ||
-                lastForecastDay != Times.day(AppPlatform.now(), repo.place.zone)
+                lastForecastDay != Times.day(AppPlatform.now(), repo.place.zone) ||
+                (page == Page.TODAY &&
+                    !showPast &&
+                    lastForecastHour != Math.floorDiv(AppPlatform.now(), 3600000L))
         ) {
             forecastVersion = repo.forecast
             lastForecastPlace = repo.place

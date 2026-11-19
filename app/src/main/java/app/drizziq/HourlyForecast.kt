@@ -17,11 +17,18 @@ class HourlyForecast(
     private val columns: List<HourlyColumn>,
     zone: String,
     initialOffset: Int,
+    onLeadingHour: (Long) -> Unit,
 ) : LinearLayout(context) {
     private val horizontal = HorizontalScrollView(context)
     private val highlightPaint =
         Paint().apply {
             color = Hud.cyan
+            strokeWidth = context.dp(1).toFloat()
+        }
+    private val dayBoundaries = hourlyDayBoundaries(columns, zone)
+    private val dayPaint =
+        Paint().apply {
+            color = Hud.muted
             strokeWidth = context.dp(1).toFloat()
         }
     private var highlighted = -1
@@ -34,6 +41,10 @@ class HourlyForecast(
 
             override fun dispatchDraw(canvas: Canvas) {
                 super.dispatchDraw(canvas)
+                dayBoundaries.forEach { index ->
+                    val x = context.dp(56) * index.toFloat()
+                    canvas.drawLine(x, 0f, x, height.toFloat(), dayPaint)
+                }
                 if (highlighted < 0) return
                 val left = context.dp(56) * highlighted.toFloat()
                 val right = left + context.dp(56)
@@ -102,10 +113,7 @@ class HourlyForecast(
             value(
                     Times.format(
                         column.time,
-                        if (repeated) "HH:mm\nz"
-                        else if (index > 0 && local.toLocalTime() == java.time.LocalTime.MIDNIGHT)
-                            "HH:mm\ndd MMM"
-                        else "HH:mm",
+                        if (repeated) "HH:mm\nz" else "HH:mm",
                         zone,
                     ),
                     Hud.ink,
@@ -129,9 +137,9 @@ class HourlyForecast(
                         weatherLabel(column.hour?.condition) ?: "No weather condition supplied"
                 }
         }
-        title(ForecastMetric.TEMPERATURE, 128, "°C")
+        title(ForecastMetric.TEMPERATURE, 72, "°C")
         ribbon = TemperatureRibbon(context, columns)
-        track.addView(ribbon, LayoutParams(context.dp(56) * columns.size, context.dp(128)))
+        track.addView(ribbon, LayoutParams(context.dp(56) * columns.size, context.dp(72)))
         title(ForecastMetric.RAIN, 46, "mm")
         val rainMax =
             max(
@@ -222,10 +230,16 @@ class HourlyForecast(
                 }
             }
         }
+        fun updateLeadingHour() {
+            val index = (horizontal.scrollX / context.dp(56)).coerceIn(columns.indices)
+            onLeadingHour(columns[index].time)
+        }
+        horizontal.setOnScrollChangeListener { _, _, _, _, _ -> updateLeadingHour() }
         updateHighlight()
         horizontal.post {
             horizontal.scrollTo(initialOffset, 0)
             initialScrollApplied = true
+            updateLeadingHour()
         }
     }
 
@@ -394,7 +408,12 @@ private class TemperatureRibbon(context: Context, private val columns: List<Hour
             val point = points[i]
             if (point != null) {
                 canvas.drawCircle(point.x, point.y, context.dp(2).toFloat(), paint)
-                canvas.drawText(labels[i], point.x, point.y - context.dp(12), paint)
+                canvas.drawText(
+                    labels[i],
+                    point.x,
+                    max(context.dp(16).toFloat(), point.y - context.dp(12)),
+                    paint,
+                )
             } else {
                 paint.color = Hud.muted
                 canvas.drawText("—", (i + .5f) * width / columns.size, height * .5f, paint)

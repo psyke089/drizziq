@@ -58,6 +58,31 @@ class ForecastPresentationTest {
     }
 
     @Test
+    fun hourlyColumns_hidingPast_startsWithContainingHourAndKeepsUnknowns() {
+        val now = at("2026-10-31T11:30:00Z")
+        val all = hourlyColumns(forecast(), now, "Europe/Berlin")
+        val visible = hourlyColumns(forecast(), now, "Europe/Berlin", showPast = false)
+        assertEquals(all.drop(currentHourColumn(all, now)), visible)
+        assertEquals(at("2026-10-31T11:00:00Z"), visible.first().time)
+        assertTrue(visible.all { it.hour == null })
+        assertEquals(all.last(), visible.last())
+    }
+
+    @Test
+    fun hourlyColumns_hidingPast_handlesRepeatedHourFractionalZoneAndHourRollover() {
+        for ((zone, now, expected) in
+            listOf(
+                Triple("Europe/Berlin", "2026-10-25T00:30:00Z", "2026-10-25T00:00:00Z"),
+                Triple("Europe/Berlin", "2026-10-25T01:30:00Z", "2026-10-25T01:00:00Z"),
+                Triple("Asia/Kolkata", "2026-10-31T02:10:00Z", "2026-10-31T02:00:00Z"),
+                Triple("Europe/Berlin", "2026-10-31T12:00:00Z", "2026-10-31T12:00:00Z"),
+            )) {
+            val columns = hourlyColumns(forecast(), at(now), zone, showPast = false)
+            assertEquals(at(expected), columns.first().time)
+        }
+    }
+
+    @Test
     fun hourlyColumns_throughTomorrowNoon_keepsPastValuesGapsAndSourceInstants() {
         val start = at("2026-10-30T23:00:00Z")
         val first = Hour(start, mapOf("TTT" to 280.0))
@@ -153,6 +178,27 @@ class ForecastPresentationTest {
             assertEquals(at(end), missing.last().time)
             assertNull(missing.last().hour)
         }
+    }
+
+    @Test
+    fun hourlyDayBoundaries_useCivilDatesAcrossDstAndFractionalOffsets() {
+        for ((zone, now) in
+            listOf(
+                "Europe/Berlin" to "2026-10-25T00:30:00Z",
+                "Europe/Berlin" to "2026-03-29T00:30:00Z",
+                "Asia/Kolkata" to "2026-10-31T02:10:00Z",
+            )) {
+            val columns = hourlyColumns(forecast(), at(now), zone)
+            val boundaries = hourlyDayBoundaries(columns, zone)
+            assertEquals(1, boundaries.size)
+            val nextDay = Times.day(columns.last().time, zone)
+            assertEquals(
+                columns.indexOfFirst { Times.day(it.time, zone) == nextDay },
+                boundaries.single(),
+            )
+            assertTrue(boundaries.single() > 0)
+        }
+        assertTrue(hourlyDayBoundaries(emptyList(), "Europe/Berlin").isEmpty())
     }
 
     @Test

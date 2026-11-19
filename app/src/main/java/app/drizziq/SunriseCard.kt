@@ -17,7 +17,7 @@ class SunriseCard(context: Context) : LinearLayout(context) {
         gravity = Gravity.CENTER_VERTICAL
         pad(14)
         background = panel()
-        minimumHeight = context.dp(92)
+        minimumHeight = context.dp(76)
         fun event(title: Int, rising: Boolean): TextView {
             val group = context.row()
             group.addView(
