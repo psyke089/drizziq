@@ -11,13 +11,13 @@ import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.text.Editable
-import android.text.InputType
 import android.text.TextWatcher
 import android.view.KeyEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
-import android.widget.ScrollView
+import android.widget.LinearLayout
 import android.widget.Toast
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.Future
@@ -49,6 +49,7 @@ class PlaceChoices(
     private var future: Future<*>? = null
     private var dialog: AlertDialog? = null
     private var searchDebounce: SearchDebounce? = null
+    private var clearInlineSearch: (() -> Unit)? = null
     private var foreground = false
     private var closed = false
     private var permissionRequest: Pair<Int, Int>? = null
@@ -72,6 +73,7 @@ class PlaceChoices(
     fun isCurrent(token: Int) = !closed && foreground && generation.isCurrent(token)
 
     fun invalidate(dismiss: Boolean = true): Int {
+        if (dismiss) clearInlineSearch?.invoke()
         searchDebounce?.cancel()
         val token = generation.next()
         future?.cancel(true)
@@ -92,13 +94,11 @@ class PlaceChoices(
         if (generation.isCurrent(token)) invalidate()
     }
 
-    private fun track(d: AlertDialog, token: () -> Int) {
+    fun track(d: AlertDialog, token: Int) {
         dialog = d
-        d.setOnCancelListener { cancel(token()) }
-        d.setOnDismissListener { cancel(token()) }
+        d.setOnCancelListener { cancel(token) }
+        d.setOnDismissListener { cancel(token) }
     }
-
-    fun track(d: AlertDialog, token: Int) = track(d) { token }
 
     fun foreground(value: Boolean) {
         foreground = value
@@ -120,44 +120,25 @@ class PlaceChoices(
         Toast.makeText(activity, "City-search cache cleared", Toast.LENGTH_SHORT).show()
     }
 
-    fun searchCity() {
-        if (closed) return
-        var token = invalidate()
-        val body = activity.column().apply { pad(20) }
-        body.addView(
-            activity.label(activity.getString(R.string.city_search_disclosure), 13f, Hud.muted)
-        )
-        body.space(12)
-        body.addView(activity.label("CITY NAME", 11f, Hud.muted, true))
-        body.space(6)
-        val input =
-            EditText(activity).apply {
-                contentDescription = "CITY NAME"
-                setSingleLine(true)
-                setTextColor(Hud.ink)
-                textSize = 16f
-                inputType = InputType.TYPE_CLASS_TEXT
-                imeOptions = EditorInfo.IME_ACTION_SEARCH
-                background = panel()
-                pad(10)
-            }
-        body.addView(input)
-        body.space(4)
-        body.addView(activity.placeCreditView())
-        body.space(10)
-        val status = activity.label(activity.getString(R.string.city_search_hint), 12f, Hud.muted)
-        body.addView(status)
-        body.space(10)
+    fun bindSearch(input: EditText, results: LinearLayout) {
+        val status = activity.label("", 12f, Hud.muted).apply { visibility = View.GONE }
+        results.addView(status)
         val rows = activity.column()
-        body.addView(rows)
-        val d =
-            activity.placeDialog(
-                AlertDialog.Builder(activity).setView(ScrollView(activity).apply { addView(body) }),
-                activity.getText(R.string.city_search_title),
-            )
-        track(d) { token }
+        results.addView(rows)
+        clearInlineSearch = {
+            if (input.hasFocus()) {
+                activity
+                    .getSystemService(InputMethodManager::class.java)
+                    .hideSoftInputFromWindow(input.windowToken, 0)
+                input.clearFocus()
+            }
+            if (input.length() > 0) input.text.clear()
+            input.error = null
+            status.visibility = View.GONE
+        }
         fun submit(text: String, force: Boolean) {
             if (closed || !foreground) return
+            status.visibility = View.VISIBLE
             val query =
                 try {
                     Geocoding.query(text)
@@ -168,8 +149,7 @@ class PlaceChoices(
                     return
                 }
             input.error = null
-            token = invalidate(false)
-            val request = token
+            val request = invalidate(false)
             rows.removeAllViews()
             status.setText(R.string.city_search_waiting)
             status.setTextColor(Hud.muted)
@@ -262,7 +242,7 @@ class PlaceChoices(
                     handler.postDelayed(task, delay)
                     Cancel { handler.removeCallbacks(task) }
                 },
-                { token = invalidate(false) },
+                { invalidate(false) },
                 { text, force -> submit(text, force) },
             )
         searchDebounce = debounce
@@ -278,8 +258,7 @@ class PlaceChoices(
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                     input.error = null
                     rows.removeAllViews()
-                    status.setText(R.string.city_search_hint)
-                    status.setTextColor(Hud.muted)
+                    status.visibility = View.GONE
                     debounce.edited(s?.toString().orEmpty())
                 }
 
@@ -296,7 +275,6 @@ class PlaceChoices(
                 true
             } else false
         }
-        d.show()
     }
 
     private fun permitted() =

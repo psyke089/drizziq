@@ -3,8 +3,8 @@
   <msgType>Update</msgType>
   <scope>Public</scope>
   <info>
-    <effective>2026-10-22T20:00:00Z</effective>
-    <onset>2026-10-22T21:00:00Z</onset>
+    <effective>2026-10-22T22:00:00+02:00</effective>
+    <onset>2026-10-22T23:00:00+02:00</onset>
     <expires>2026-10-22T23:00:00Z</expires>
     <headline>Fixture wind warning</headline>
     <description>Strong gusts expected.</description>

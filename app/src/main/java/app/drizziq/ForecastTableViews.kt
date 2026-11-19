@@ -35,7 +35,7 @@ class FavouriteCard(
     place: Place,
     selected: Boolean,
     select: () -> Unit,
-    delete: () -> Unit,
+    delete: (() -> Unit)?,
 ) : LinearLayout(context) {
     init {
         orientation = HORIZONTAL
@@ -46,8 +46,7 @@ class FavouriteCard(
         isFocusable = true
         val name = placeDisplayName(place, null)
         contentDescription = "Select favourite $name"
-        if (selected)
-            background = panel(0xFF102B35.toInt(), 0xFF102B35.toInt(), context.dp(10).toFloat())
+        if (selected) setBackgroundColor(0xFF102B35.toInt())
         setOnClickListener { select() }
         addView(
             SvgIcon(context, "nav-places").apply {
@@ -65,25 +64,28 @@ class FavouriteCard(
         )
         addView(content, LayoutParams(0, -2, 1f))
 
-        val deleteButton =
-            FrameLayout(context).apply {
-                tag = "favourite-delete"
-                isClickable = true
-                isFocusable = true
-                contentDescription = "Delete favourite $name"
+        minimumHeight = context.dp(64)
+        if (delete != null) {
+            val deleteButton =
+                FrameLayout(context).apply {
+                    tag = "favourite-delete"
+                    isClickable = true
+                    isFocusable = true
+                    contentDescription = "Delete favourite $name"
 
-                addView(
-                    SvgIcon(context, "delete").apply {
-                        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
-                    },
-                    FrameLayout.LayoutParams(context.dp(19), context.dp(19), Gravity.CENTER),
-                )
-                setOnClickListener { delete() }
-            }
-        addView(
-            deleteButton,
-            LayoutParams(context.dp(48), context.dp(48)).apply { leftMargin = context.dp(12) },
-        )
+                    addView(
+                        SvgIcon(context, "delete").apply {
+                            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+                        },
+                        FrameLayout.LayoutParams(context.dp(19), context.dp(19), Gravity.CENTER),
+                    )
+                    setOnClickListener { delete() }
+                }
+            addView(
+                deleteButton,
+                LayoutParams(context.dp(48), context.dp(48)).apply { leftMargin = context.dp(12) },
+            )
+        }
     }
 }
 

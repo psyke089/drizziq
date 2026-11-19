@@ -101,7 +101,7 @@ class DataTest {
         assertEquals(23, santiago.hours.size)
         assertEquals(23.0, santiago.rain!!, 0.0)
 
-        val havana = day("America/Havana", "2026-11-01")
+        val havana = day("America/Havana", "2024-11-03")
         assertTrue(havana.complete)
         assertEquals(25, havana.hours.size)
         assertEquals(25.0, havana.rain!!, 0.0)

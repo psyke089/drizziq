@@ -315,7 +315,6 @@ class PhoneExercise : Instrumentation() {
                     click("Play or pause radar animation")
                     click("Places")
                     check(has("FAVOURITES"))
-                    click("SEARCH CITY")
                     enter("CITY NAME", "München")
                     waitFor("city results") {
                         nodes().any {
@@ -323,7 +322,7 @@ class PhoneExercise : Instrumentation() {
                                 true
                         }
                     }
-                    click("Close dialog")
+                    enter("CITY NAME", "")
                     check(has("FAVOURITES"))
                     click("Today")
                     check(has("Temperature "))
@@ -1073,9 +1072,7 @@ class PhoneExercise : Instrumentation() {
                     check(
                         tab("Places").isSelected && has("FAVOURITES") && !has("ENTER COORDINATES")
                     )
-                    click("SEARCH CITY")
-                    check(has("Search city"))
-                    click("Close dialog")
+                    check(has("CITY NAME") && has("GeoNames"))
                     check(tab("Places").isSelected && has("FAVOURITES"))
                     click("Week")
                     check(
@@ -1096,7 +1093,7 @@ class PhoneExercise : Instrumentation() {
                     check(has("arrow shows wind flow")) { "Wind direction symbol is missing" }
                     result.putString(
                         "checks",
-                        "removed forecast labels; wind compass accessible; all four tabs select their screen; bottom tab bar fixed during scroll; Places search dialog cancels back to Places; forecast restored",
+                        "removed forecast labels; wind compass accessible; all four tabs select their screen; bottom tab bar fixed during scroll; Places has inline city search; forecast restored",
                     )
                 }
                 "lifecycle" -> {
@@ -1306,7 +1303,7 @@ class PhoneExercise : Instrumentation() {
                     check(!has("switch saved place")) {
                         "Switcher appeared with only one favourite"
                     }
-                    check(!has("Place names")) { "Search credit appeared under favourites" }
+                    check(has("Place names") && has("CITY NAME"))
                     store.save(berlin)
                     click("Today")
                     click("Places")
@@ -1327,7 +1324,7 @@ class PhoneExercise : Instrumentation() {
                     click("Close dialog")
                     check(store.selected() == Place.MUNICH)
                     click("Munich, switch saved place")
-                    click("Berlin")
+                    click("Select favourite Berlin")
                     waitFor("switched city") {
                         store.selected() == berlin &&
                             has("Berlin, switch saved place") &&
@@ -1342,9 +1339,7 @@ class PhoneExercise : Instrumentation() {
                     check(!has("switch saved place")) {
                         "Switcher remained with only one favourite"
                     }
-                    click("SEARCH CITY")
                     check(has("Open-Meteo") && has("GeoNames"))
-                    click("Close dialog")
                     result.putString(
                         "checks",
                         "multiple saved places open and switch from the header; dismissal preserves selection; source credit stays in search",
@@ -1367,7 +1362,6 @@ class PhoneExercise : Instrumentation() {
                     var owner = activity
                     try {
                         click("Places")
-                        click("SEARCH CITY")
                         enter("CITY NAME", "München")
                         submitSearch()
                         waitFor("candidate list", 45000) {
@@ -1565,9 +1559,8 @@ class PhoneExercise : Instrumentation() {
                         )
                     }
                     click("Places")
-                    click("SEARCH CITY")
-                    waitFor("search disclosure and attribution", 3000) {
-                        has("Open-Meteo") && has("query")
+                    waitFor("inline search and attribution", 3000) {
+                        has("Open-Meteo") && has("GeoNames") && has("CITY NAME")
                     }
                     enter("CITY NAME", "M")
                     submitSearch()
@@ -1599,7 +1592,9 @@ class PhoneExercise : Instrumentation() {
                         results.any { it.contains("Berlin") } &&
                             results.none { it.contains("München") }
                     }
-                    click("Close dialog")
+                    click("Today")
+                    click("Places")
+                    check(!has("Select city result"))
                     click("CLEAR SEARCH CACHE")
                     click("DATA & LICENCES")
                     waitFor("licence dialog", 5000) { has("Application licence (MIT)") }
@@ -2047,7 +2042,6 @@ class PhoneExercise : Instrumentation() {
                     enter("FAVOURITE LABEL", "Munich home")
                     click("Save")
                     click("PLACES")
-                    click("SEARCH CITY")
                     enter("CITY NAME", "Berlin")
                     submitSearch()
                     waitFor("Berlin city result", 45000) {

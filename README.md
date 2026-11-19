@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/psyke089/drizziq"><img src="docs/badges/github.svg" alt="GitHub · public repository"></a>
-  <a href="app/build.gradle.kts"><img src="docs/badges/version.svg" alt="Version 1.6.6"></a>
+  <a href="app/build.gradle.kts"><img src="docs/badges/version.svg" alt="Version 1.7.0"></a>
   <img src="docs/badges/android.svg" alt="Android 7.0+ · API 24">
   <a href="LICENSE"><img src="docs/badges/license.svg" alt="Licence MIT"></a>
 </p>
@@ -35,7 +35,7 @@ Pan, zoom, scrub and play the rain radar. The newest image appears first, cached
 
 <p align="center"><img src="docs/screenshot-places.png" alt="Places view with saved favourites" width="300"></p>
 
-Search a city after a 400 ms pause, or take one explicit location snapshot. Tap the city name in the header to switch when two or more favourites are saved. Favourites keep their provenance and survive restarts. Positions are resolved locally without reverse geocoding, and location permission is optional.
+Type directly in Places to search for a city. Results appear below the input after a 400 ms pause. The crosshair button takes one location snapshot. Tap the city name in the header to switch when two or more favourites are saved. Favourites keep their provenance and survive restarts. Positions are resolved locally without reverse geocoding, and location permission is optional.
 
 ## Build
 

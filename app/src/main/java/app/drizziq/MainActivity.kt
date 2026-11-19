@@ -298,7 +298,7 @@ class MainActivity : Activity() {
             }
         val placeColumn = column()
         placeTitle =
-            label("Munich", 20f).apply {
+            label("Munich", 24f).apply {
                 tag = "place-name"
                 setOnClickListener { switchSavedPlace() }
                 isClickable = false
@@ -762,11 +762,11 @@ class MainActivity : Activity() {
             ImageButton(this).apply {
                 setImageResource(R.drawable.ic_play)
                 contentDescription = "Play or pause radar animation"
-                setPadding(dp(12), dp(8), dp(12), dp(8))
+                setPadding(dp(5), dp(8), dp(5), dp(8))
                 background = null
                 setOnClickListener { setPlaying(!playing) }
             }
-        controls.addView(playButton, LinearLayout.LayoutParams(dp(48), dp(40)))
+        controls.addView(playButton, LinearLayout.LayoutParams(dp(34), dp(40)))
         timeline =
             RadarTimeline(this).apply {
                 onSelect = {
@@ -776,7 +776,7 @@ class MainActivity : Activity() {
             }
         controls.addView(
             timeline,
-            LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(8) },
+            LinearLayout.LayoutParams(0, dp(40), 1f),
         )
         radarTime =
             label("—", 12f, Hud.ink, true).apply {
@@ -805,7 +805,7 @@ class MainActivity : Activity() {
                     }
                 }
             }
-        controls.addView(speedButton, LinearLayout.LayoutParams(dp(48), dp(40)))
+        controls.addView(speedButton, LinearLayout.LayoutParams(dp(34), dp(40)))
         radarPanel.addView(
             controls,
             FrameLayout.LayoutParams(-1, dp(40), Gravity.BOTTOM),
@@ -1056,6 +1056,7 @@ class MainActivity : Activity() {
     private fun showPage(value: Page) {
         if (value == Page.TODAY && page != Page.TODAY) hourlyView = null
         if (page == Page.TODAY || page == Page.WEEK) forecastOffsets[page] = forecastScroll.scrollY
+        if (page == Page.PLACES && value != page) placeChoices.invalidate()
         page = value
         bindWarnings(AppPlatform.now())
         radarVisible = value == Page.RADAR
@@ -1188,10 +1189,6 @@ class MainActivity : Activity() {
         if (placeTitle.isClickable == canSwitch) return
         placeTitle.isClickable = canSwitch
         placeTitle.isFocusable = canSwitch
-        placeTitle.background =
-            if (canSwitch) panel(Hud.panel, Hud.line, dp(10).toFloat()) else null
-        val inset = if (canSwitch) dp(10) else 0
-        placeTitle.setPadding(inset, dp(3), inset, dp(3))
         placeTitle.setCompoundDrawablesRelative(
             null,
             null,
@@ -1207,29 +1204,37 @@ class MainActivity : Activity() {
     private fun switchSavedPlace() {
         val choices = favourites
         if (choices.size < 2) return
-        val selected = choices.indexOfFirst { it.lat == repo.place.lat && it.lon == repo.place.lon }
         val token = placeChoices.invalidate()
+        val body = column().apply { pad(16) }
         val dialog =
             placeDialog(
-                AlertDialog.Builder(this).setSingleChoiceItems(
-                    choices.map { placeDisplayName(it, null) }.toTypedArray(),
-                    selected,
-                ) { dialog, index ->
-                    if (!placeChoices.isCurrent(token)) return@setSingleChoiceItems
-                    val place = choices[index]
-                    if (place == repo.place) dialog.dismiss()
-                    else if (choose(place) && page == Page.PLACES) locations()
-                },
+                AlertDialog.Builder(this).setView(ScrollView(this).apply { addView(body) }),
                 getString(R.string.saved_places),
             )
+        body.addView(
+            favouriteList(
+                choices,
+                select = { place ->
+                    if (placeChoices.isCurrent(token)) {
+                        if (place == repo.place) dialog.dismiss()
+                        else if (choose(place) && page == Page.PLACES) locations()
+                    }
+                },
+            )
+        )
         placeChoices.track(dialog, token)
         dialog.show()
     }
 
     private fun locations() {
+        placeChoices.invalidate()
         favourites = store.favourites()
         bindPlaceTitle()
-        val body = column().apply { setPadding(dp(20), dp(20), dp(20), 0) }
+        val body =
+            column().apply {
+                setPadding(dp(20), dp(20), dp(20), 0)
+                isFocusableInTouchMode = true
+            }
         placesScroll.removeAllViews()
         placesScroll.addView(body)
         fun iconButton(icon: Int, description: String, click: () -> Unit) =
@@ -1242,24 +1247,27 @@ class MainActivity : Activity() {
                 setOnClickListener { click() }
             }
         val searchRow = row()
-        searchRow.addView(
-            action("SEARCH CITY") { placeChoices.searchCity() }
-                .apply {
-                    gravity = Gravity.START or Gravity.CENTER_VERTICAL
-                    setPadding(dp(16), 0, dp(16), 0)
-                    compoundDrawablePadding = dp(12)
-                    setCompoundDrawablesRelative(
-                        getDrawable(R.drawable.ic_search)?.apply {
-                            setBounds(0, 0, dp(21), dp(21))
-                        },
-                        null,
-                        null,
-                        null,
-                    )
-                    background = panel(Hud.legend, Hud.line, dp(12).toFloat())
-                },
-            LinearLayout.LayoutParams(0, -2, 1f),
-        )
+        val input =
+            EditText(this).apply {
+                contentDescription = "CITY NAME"
+                setHint(R.string.city_search_title)
+                inputType = InputType.TYPE_CLASS_TEXT
+                setSingleLine(true)
+                imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+                setTextColor(Hud.ink)
+                setHintTextColor(Hud.muted)
+                textSize = 16f
+                setPadding(dp(12), 0, dp(12), 0)
+                compoundDrawablePadding = dp(10)
+                setCompoundDrawablesRelative(
+                    getDrawable(R.drawable.ic_search)?.apply { setBounds(0, 0, dp(20), dp(20)) },
+                    null,
+                    null,
+                    null,
+                )
+                background = panel(Hud.legend, Hud.line, dp(12).toFloat())
+            }
+        searchRow.addView(input, LinearLayout.LayoutParams(0, dp(48), 1f))
         searchRow.addView(
             iconButton(R.drawable.ic_location_crosshair, "USE CURRENT LOCATION") {
                 placeChoices.currentLocation()
@@ -1267,6 +1275,10 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(dp(48), dp(48)).apply { leftMargin = dp(8) },
         )
         body.addView(searchRow)
+        body.addView(placeCreditView())
+        val results = column()
+        body.addView(results)
+        placeChoices.bindSearch(input, results)
         body.space(16)
         val section = row()
         section.addView(
@@ -1290,41 +1302,24 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(dp(48), dp(48)),
         )
         body.addView(section)
-        val list =
-            column().apply {
-                background = panel(Hud.panel, Hud.line, dp(12).toFloat())
-                pad(2)
-            }
-        body.addView(list)
-        if (favourites.isEmpty())
-            list.addView(label("Saved places will appear here.", 13f, Hud.muted).apply { pad(16) })
-        favourites.forEachIndexed { index, place ->
-            if (index > 0)
-                list.addView(
-                    View(this).apply { setBackgroundColor(Hud.line) },
-                    LinearLayout.LayoutParams(-1, dp(1)),
-                )
-            list.addView(
-                FavouriteCard(
-                    this,
-                    place,
-                    selected = repo.place.lat == place.lat && repo.place.lon == place.lon,
-                    select = {
-                        if (choose(place)) showPage(Page.TODAY)
-                    },
-                    delete = {
-                        if (store.delete(place)) locations()
-                        else
-                            Toast.makeText(
-                                    this,
-                                    "Favourite could not be deleted. Please retry.",
-                                    Toast.LENGTH_LONG,
-                                )
-                                .show()
-                    },
-                )
+        body.addView(
+            favouriteList(
+                favourites,
+                select = { place ->
+                    if (choose(place)) showPage(Page.TODAY)
+                },
+                delete = { place ->
+                    if (store.delete(place)) locations()
+                    else
+                        Toast.makeText(
+                                this,
+                                "Favourite could not be deleted. Please retry.",
+                                Toast.LENGTH_LONG,
+                            )
+                            .show()
+                },
             )
-        }
+        )
         body.space(12)
         val footer = row()
         for ((title, click) in
@@ -1353,6 +1348,38 @@ class MainActivity : Activity() {
                 setPadding(0, 0, 0, dp(12))
             }
         )
+    }
+
+    private fun favouriteList(
+        places: List<Place>,
+        select: (Place) -> Unit,
+        delete: ((Place) -> Unit)? = null,
+    ): LinearLayout {
+        val list =
+            column().apply {
+                background = panel(Hud.panel, Hud.line, dp(12).toFloat())
+                clipToOutline = true
+                pad(1)
+            }
+        if (places.isEmpty())
+            list.addView(label("Saved places will appear here.", 13f, Hud.muted).apply { pad(16) })
+        places.forEachIndexed { index, place ->
+            if (index > 0)
+                list.addView(
+                    View(this).apply { setBackgroundColor(Hud.line) },
+                    LinearLayout.LayoutParams(-1, dp(1)),
+                )
+            list.addView(
+                FavouriteCard(
+                    this,
+                    place,
+                    selected = repo.place.lat == place.lat && repo.place.lon == place.lon,
+                    select = { select(place) },
+                    delete = delete?.let { remove -> { remove(place) } },
+                )
+            )
+        }
+        return list
     }
 
     private fun notices() {

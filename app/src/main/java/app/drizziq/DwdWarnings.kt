@@ -2,7 +2,7 @@ package app.drizziq
 
 import java.io.ByteArrayOutputStream
 import java.io.StringReader
-import java.time.Instant
+import java.time.OffsetDateTime
 import java.util.zip.ZipInputStream
 import javax.xml.parsers.DocumentBuilderFactory
 import org.w3c.dom.Element
@@ -116,7 +116,7 @@ internal object DwdWarnings {
         children(name).firstOrNull()?.textContent?.trim().orEmpty()
 
     private fun parseTime(value: String): Long? = runCatching {
-        Instant.parse(value).toEpochMilli()
+        OffsetDateTime.parse(value).toInstant().toEpochMilli()
     }
         .getOrNull()
 
