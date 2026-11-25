@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/psyke089/drizziq"><img src="docs/badges/github.svg" alt="GitHub · public repository"></a>
-  <a href="app/build.gradle.kts"><img src="docs/badges/version.svg" alt="Version 1.7.1"></a>
+  <a href="app/build.gradle.kts"><img src="docs/badges/version.svg" alt="Version 1.8.0"></a>
   <img src="docs/badges/android.svg" alt="Android 7.0+ · API 24">
   <a href="LICENSE"><img src="docs/badges/license.svg" alt="Licence MIT"></a>
 </p>
@@ -17,7 +17,7 @@ Native Kotlin for Android 7.0+, one dark HUD, no cloud account. Station selectio
 
 <p align="center"><img src="docs/screenshot.png" alt="Today view with hourly forecast" width="300"></p>
 
-The selected place's civil day from midnight through noon tomorrow: hourly temperature, precipitation, wind and gusts from the nearest bundled DWD MOSMIX station within 50 km; station details and distance are shown in Week. The table starts at the current hour; enable `past` to include earlier hours (the choice is saved). The date follows horizontal scrolling, a line marks the next day, and the refresh icon reloads DWD data. The shared header looks identical across Today, Week, Radar and Places. Available official DWD weather warnings appear under the city name in every view and open their details when tapped. Sun times are computed on device and work offline. Hours before the latest issue are filled from the preceding issue and stay forecasts, not observations; fields DWD does not supply stay unknown. A stale or failed refresh never silently replaces good data — cached readings are labelled and kept.
+The selected place's civil day from midnight through noon tomorrow: hourly temperature, precipitation, wind and gusts from the nearest bundled DWD MOSMIX station within 50 km; station details and distance are shown in Week. The table starts at the current hour; enable `past` to include earlier hours (the choice is saved). The date follows horizontal scrolling, a line marks the next day, and the refresh icon reloads DWD data. The shared header looks identical across Today, Week, Radar and Places. Available official DWD weather warnings open from below the city name on every tab. The warning dialog remembers the selected language and uses the German original when a translation is unavailable. Sun times are computed on device and work offline. Hours before the latest issue are filled from the preceding issue and stay forecasts, not observations; fields DWD does not supply stay unknown. A stale or failed refresh never silently replaces good data — cached readings are labelled and kept.
 
 ## Week
 
@@ -27,9 +27,12 @@ Seven local days at a glance: condition, high and low, rain, maximum wind and su
 
 ## Radar
 
-<p align="center"><img src="docs/screenshot-radar.png" alt="Radar view with timeline and playback" width="300"></p>
+<p align="center">
+  <img src="docs/screenshot-radar.png" alt="Radar view with timeline and playback" width="300">
+  <img src="docs/screenshot-radar-settings.png" alt="Radar settings with map theme and update interval" width="300">
+</p>
 
-Pan, zoom, scrub and play the rain radar. The newest image appears first, cached frames show instantly, and the timeline distinguishes observed frames from forecasts with filled and outlined markers. Slow the loop to 0.5× if needed. Radar polls every five minutes only while visible, and only the visible map tiles are requested and revalidated.
+Pan, zoom, scrub and play the rain radar. The newest image appears first, cached frames show instantly, and the timeline distinguishes observed frames from forecasts with filled and outlined markers. Slow the loop to 0.5× if needed. Use the gear to choose the original, medium contrast or high contrast basemap and set the automatic refresh interval. Radar checks for updates only while visible, every five minutes by default. Only visible map tiles are requested and revalidated.
 
 ## Places
 

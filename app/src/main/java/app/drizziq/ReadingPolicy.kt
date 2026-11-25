@@ -2,6 +2,11 @@ package app.drizziq
 
 internal const val FORECAST_MAX_AGE = 9 * 3_600_000L
 internal const val RADAR_MAX_AGE = 20 * 60_000L
+internal const val DEFAULT_RADAR_INTERVAL = 5
+internal val RADAR_INTERVALS = listOf(DEFAULT_RADAR_INTERVAL, 10, 15, 30)
+
+internal fun radarPollDue(now: Long, lastAttempt: Long?, intervalMinutes: Int): Boolean =
+    lastAttempt == null || now < lastAttempt || now - lastAttempt >= intervalMinutes * 60_000L
 
 /** Explicit time inputs keep expiry rules deterministic in JVM tests. */
 internal fun issueFreshness(

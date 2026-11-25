@@ -5,6 +5,16 @@ import org.junit.Test
 
 class ReadingPolicyTest {
     @Test
+    fun radarPolling_waitsForTheSelectedIntervalAfterAnAttempt() {
+        val attempt = 1_000_000L
+        assertTrue(radarPollDue(attempt, null, 10))
+        assertFalse(radarPollDue(attempt + 599_999L, attempt, 10))
+        assertTrue(radarPollDue(attempt + 600_000L, attempt, 10))
+        assertTrue(radarPollDue(attempt + 300_000L, attempt, 5))
+        assertTrue(radarPollDue(attempt - 1, attempt, 10))
+    }
+
+    @Test
     fun automaticRefresh_usesReceiptIntervalAndRetriesMissingOrFailedData() {
         val live = Reading("forecast", Freshness.LIVE, 100L)
         assertFalse(live.needsRefresh(199, 100))

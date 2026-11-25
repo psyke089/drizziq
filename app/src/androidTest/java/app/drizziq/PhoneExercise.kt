@@ -1350,6 +1350,15 @@ class PhoneExercise : Instrumentation() {
                         waitFor("warning details in $tab") { has("Fixture wind warning") }
                         click("Close dialog")
                     }
+                    fun nameAndCoordinatesTop(place: String): Pair<Int, Int> {
+                        val header = nodes()
+                        fun top(node: AccessibilityNodeInfo) =
+                            Rect().also(node::getBoundsInScreen).top
+                        return top(
+                            header.first { it.contentDescription == "$place, switch saved place" }
+                        ) to top(header.first { it.text?.contains("°N") == true })
+                    }
+                    val withWarning = nameAndCoordinatesTop("Munich")
                     click("Munich, switch saved place")
                     waitFor("saved places overlay") { has("Saved places") }
                     check(has("Munich") && has("Berlin"))
@@ -1365,6 +1374,9 @@ class PhoneExercise : Instrumentation() {
                             nodes().any {
                                 it.contentDescription?.toString() == "Today" && it.isSelected
                             }
+                    }
+                    check(nameAndCoordinatesTop("Berlin") == withWarning) {
+                        "The shared header moves when the warning link disappears"
                     }
                     click("Places")
                     click("Delete favourite Munich")
@@ -1841,7 +1853,7 @@ class PhoneExercise : Instrumentation() {
                     PhoneFixtures.radarArchive = archive.toByteArray()
                     PhoneFixtures.radarHistoryGate = gate
                     try {
-                        click("Radar details")
+                        click("Radar settings")
                         check(has("Last successful download:") && has("Images:") && has("History:"))
                         click("Refresh now")
                         waitFor("ready images while history is pending", 10000) {
@@ -1883,7 +1895,7 @@ class PhoneExercise : Instrumentation() {
                             !repo.radar.refreshing && repo.radarProgress.phase == RadarPhase.FAILED
                         }
                         check(repo.radar.fetched == null && repo.radar.data == null)
-                        click("Close radar details")
+                        click("Close radar settings")
                     } finally {
                         gate.countDown()
                         PhoneFixtures.radarHistoryGate = null

@@ -9,11 +9,13 @@ object IconAssets {
             "delete" -> R.drawable.ic_delete
             "favourite" -> R.drawable.ic_favourite
             "favourite-filled" -> R.drawable.ic_favourite_filled
-            "info" -> R.drawable.ic_info
             "launcher-foreground" -> R.drawable.ic_launcher_foreground
             "launcher-legacy" -> R.drawable.ic_launcher_legacy
             "location-crosshair" -> R.drawable.ic_location_crosshair
             "logo" -> R.drawable.ic_logo
+            "map-high" -> R.drawable.ic_map_high
+            "map-medium" -> R.drawable.ic_map_medium
+            "map-original" -> R.drawable.ic_map_original
             "metric-direction" -> R.drawable.ic_metric_direction
             "metric-gust" -> R.drawable.ic_metric_gust
             "metric-high" -> R.drawable.ic_metric_high
@@ -35,6 +37,7 @@ object IconAssets {
             "refresh" -> R.drawable.ic_refresh
             "save-favourite" -> R.drawable.ic_save_favourite
             "search" -> R.drawable.ic_search
+            "settings" -> R.drawable.ic_settings
             "sunrise" -> R.drawable.ic_sunrise
             "sunset" -> R.drawable.ic_sunset
             "warning" -> R.drawable.ic_warning

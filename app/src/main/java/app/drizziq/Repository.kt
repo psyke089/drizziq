@@ -286,57 +286,77 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
         val fetched: Long,
     )
 
-    private var warningSnapshot: WarningSnapshot? = null
-    private var warningRequest: Pair<Place, Long>? = null
-    private var warningBusy = false
-    // Access the nationwide archive only on the serial warning worker.
+    // Both public status feeds share a serial worker. The larger archive is only used on demand.
     private val warningWorker = Executors.newSingleThreadExecutor()
-    private var warningArchive: Pair<ByteArray, Long>? = null
+    private val warningFeed = WarningFeed(multilingual = false)
+    private val warningTranslations = WarningFeed(multilingual = true)
 
-    internal fun warnings(now: Long): List<DwdWarning> =
-        warningSnapshot
-            ?.takeIf {
-                it.place == place && now - it.fetched in 0..15 * 60_000L
-            }
-            ?.warnings
-            .orEmpty()
-            .filter { now < it.expires }
+    internal fun warnings(now: Long) = warningFeed.current(now)
 
-    internal fun refreshWarnings(now: Long, force: Boolean = false) {
-        if (!online || warningBusy || closed.get()) return
-        val selected = place
-        if (
-            !force &&
-                warningRequest?.let {
-                    it.first == selected && now - it.second in 0 until 5 * 60_000L
-                } == true
-        )
-            return
-        warningRequest = selected to now
-        warningBusy = true
-        warningWorker.execute {
-            val result = runCatching {
-                val (bytes, fetched) =
-                    warningArchive?.takeIf {
-                        !force && now - it.second in 0 until 5 * 60_000L
-                    }
-                        ?: (Http.bytes(
-                            Http.WEATHER + DwdWarnings.PATH,
-                            DwdWarnings.DOWNLOAD_LIMIT,
-                        ) to AppPlatform.now())
-                val alerts = DwdWarnings.at(bytes, selected, AppPlatform.now())
-                warningArchive = bytes to fetched
-                WarningSnapshot(selected, alerts, fetched)
+    internal fun warningTranslations(now: Long) = warningTranslations.current(now)
+
+    internal val loadingWarningTranslations: Boolean
+        get() = warningTranslations.busy
+
+    internal fun refreshWarnings(now: Long, force: Boolean = false) =
+        warningFeed.refresh(now, force)
+
+    internal fun refreshWarningTranslations(now: Long) = warningTranslations.refresh(now)
+
+    private inner class WarningFeed(private val multilingual: Boolean) {
+        private var snapshot: WarningSnapshot? = null
+        private var request: Pair<Place, Long>? = null
+        private var archive: Pair<ByteArray, Long>? = null
+        var busy = false
+            private set
+
+        fun current(now: Long): List<DwdWarning> =
+            snapshot
+                ?.takeIf { it.place == place && now - it.fetched in 0..15 * 60_000L }
+                ?.warnings
+                .orEmpty()
+                .filter { now < it.expires }
+
+        fun refresh(now: Long, force: Boolean = false) {
+            if (!online || busy || closed.get()) return
+            val selected = place
+            if (
+                !force &&
+                    request?.let {
+                        it.first == selected && now - it.second in 0 until 5 * 60_000L
+                    } == true
+            )
+                return
+            request = selected to now
+            busy = true
+            warningWorker.execute {
+                val result = runCatching {
+                    val (bytes, fetched) =
+                        archive?.takeIf { !force && now - it.second in 0 until 5 * 60_000L }
+                            ?: downloadWarnings()
+                    val alerts = DwdWarnings.at(bytes, selected, AppPlatform.now(), multilingual)
+                    archive = bytes to fetched
+                    WarningSnapshot(selected, alerts, fetched)
+                }
+                post {
+                    busy = false
+                    if (place == selected) result.getOrNull()?.let { snapshot = it }
+                    changed()
+                }
             }
-            post {
-                warningBusy = false
-                if (place == selected) result.getOrNull()?.let { warningSnapshot = it }
-                changed()
-            }
+        }
+
+        private fun downloadWarnings(): Pair<ByteArray, Long> {
+            val path = if (multilingual) DwdWarnings.MULTILINGUAL_PATH else DwdWarnings.PATH
+            val limit =
+                if (multilingual) DwdWarnings.MULTILINGUAL_DOWNLOAD_LIMIT
+                else DwdWarnings.DOWNLOAD_LIMIT
+            return Http.bytes(Http.WEATHER + path, limit) to AppPlatform.now()
         }
     }
 
     private var radarBusy = false
+    private var lastRadarAttempt: Long? = null
     private val radarWorker = Executors.newSingleThreadExecutor()
     private val radarGeneration = RequestGeneration()
     private val frameBitmaps = LinkedHashMap<String, Bitmap>()
@@ -515,10 +535,10 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
         post { if (radarGeneration.isCurrent(token)) action() }
     }
 
-    fun showRadar() {
+    fun showRadar(intervalMinutes: Int) {
         if (radarBusy || closed.get()) return
-        if (radar.data == null) loadRadarCache()
-        else if (online && radar.needsRefresh(AppPlatform.now(), 300_000L)) refreshRadar()
+        if (!radarPollDue(AppPlatform.now(), lastRadarAttempt, intervalMinutes)) return
+        if (radar.data == null) loadRadarCache() else if (online) refreshRadar()
     }
 
     private fun readRadarCache(): RadarSnapshot? {
@@ -561,6 +581,7 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
      */
     fun pauseRadar() {
         if (!radarBusy) return
+        if (radarProgress.phase != RadarPhase.CLEARING) lastRadarAttempt = null
         radarGeneration.next()
         radarBusy = false
         radarProgress = radarProgress.copy(phase = RadarPhase.IDLE)
@@ -570,6 +591,7 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
 
     fun refreshRadar() {
         if (radarBusy || closed.get()) return
+        if (online) lastRadarAttempt = AppPlatform.now()
         radarBusy = true
         val token = radarGeneration.next()
         radarProgress = RadarProgress(phase = RadarPhase.DOWNLOAD)
@@ -718,6 +740,7 @@ class Repository(private val context: Context, private val changed: () -> Unit) 
 
     fun clearRadarCache() {
         if (closed.get() || radarProgress.phase == RadarPhase.CLEARING) return
+        lastRadarAttempt = AppPlatform.now()
         val token = radarGeneration.next()
         radarBusy = true
         radarProgress = RadarProgress(phase = RadarPhase.CLEARING)

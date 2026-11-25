@@ -1,4 +1,7 @@
 <resources>
     <string name="weather_warnings">Warnungen</string>
     <string name="warning_source">Quelle: Deutscher Wetterdienst (CC BY 4.0)</string>
+    <string name="warning_language">Warnsprache</string>
+    <string name="warning_translation_loading">Übersetzungen werden geladen …</string>
+    <string name="warning_translation_fallback">Fehlende Übersetzungen werden auf Deutsch angezeigt.</string>
 </resources>

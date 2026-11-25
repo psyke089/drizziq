@@ -9,6 +9,29 @@ import org.w3c.dom.Element
 import org.xml.sax.InputSource
 import org.xml.sax.SAXException
 
+internal enum class WarningLanguage(val code: String, val title: String) {
+    GERMAN("de", "Deutsch"),
+    ENGLISH("en", "English"),
+    FRENCH("fr", "Français"),
+    SPANISH("es", "Español"),
+    ARABIC("ar", "العربية"),
+    RUSSIAN("ru", "Русский"),
+    TURKISH("tr", "Türkçe"),
+    POLISH("pl", "Polski");
+
+    companion object {
+        fun fromTag(tag: String): WarningLanguage? = entries.firstOrNull {
+            it.code == tag.substringBefore('-').lowercase()
+        }
+    }
+}
+
+internal data class WarningText(
+    val headline: String,
+    val description: String,
+    val instruction: String,
+)
+
 internal data class DwdWarning(
     val headline: String,
     val description: String,
@@ -16,17 +39,29 @@ internal data class DwdWarning(
     val starts: Long,
     val expires: Long,
     val geometryCredit: String,
+    val id: String?,
+    val translations: Map<WarningLanguage, WarningText>,
 )
 
 internal object DwdWarnings {
     const val PATH =
         "alerts/cap/COMMUNEUNION_DWD_STAT/Z_CAP_C_EDZW_LATEST_PVW_STATUS_PREMIUMDWD_COMMUNEUNION_DE.zip"
+    const val MULTILINGUAL_PATH =
+        "alerts/cap/COMMUNEUNION_DWD_STAT/Z_CAP_C_EDZW_LATEST_PVW_STATUS_PREMIUMDWD_COMMUNEUNION_MUL.zip"
     const val DOWNLOAD_LIMIT = 8 * 1024 * 1024
+    const val MULTILINGUAL_DOWNLOAD_LIMIT = 16 * 1024 * 1024
     private const val XML_LIMIT = 32 * 1024 * 1024
+    private const val MULTILINGUAL_XML_LIMIT = 96 * 1024 * 1024
+    private const val XML_ENTRY_LIMIT = 16 * 1024 * 1024
     private const val NS = "urn:oasis:names:tc:emergency:cap:1.2"
     private val whitespace = Regex("\\s+")
 
-    fun at(archive: ByteArray, place: Place, now: Long): List<DwdWarning> {
+    fun at(
+        archive: ByteArray,
+        place: Place,
+        now: Long,
+        multilingual: Boolean = false,
+    ): List<DwdWarning> {
         require(archive.size >= 22 && archive[0] == 0x50.toByte() && archive[1] == 0x4b.toByte()) {
             "Expected a DWD CAP ZIP archive"
         }
@@ -36,7 +71,7 @@ internal object DwdWarnings {
                 .newDocumentBuilder()
         parser.setEntityResolver { _, _ -> throw SAXException("External CAP entity") }
         return ZipInputStream(archive.inputStream()).use { zip ->
-            var remaining = XML_LIMIT
+            var remaining = if (multilingual) MULTILINGUAL_XML_LIMIT else XML_LIMIT
             var count = 0
             val buffer = ByteArray(8192)
             buildList {
@@ -50,7 +85,12 @@ internal object DwdWarnings {
                         if (read < 0) break
                         remaining -= read
                         require(remaining >= 0) { "CAP archive exceeds expanded size limit" }
-                        if (isXml) xml.write(buffer, 0, read)
+                        if (isXml) {
+                            require(xml.size() + read <= XML_ENTRY_LIMIT) {
+                                "CAP entry is too large"
+                            }
+                            xml.write(buffer, 0, read)
+                        }
                     }
                     if (!isXml) continue
                     // Read the DWD's UTF-8 as characters and reject DTDs on every Android version.
@@ -64,14 +104,26 @@ internal object DwdWarnings {
                             alert.text("msgType") !in listOf("Alert", "Update")
                     )
                         continue
-                    for (info in alert.children("info")) {
+                    val id =
+                        alert
+                            .children("code")
+                            .map { it.textContent.trim() }
+                            .firstOrNull { it.startsWith("id:") && it.length > 3 }
+                    val infos = alert.children("info").toList()
+                    for (info in infos) {
+                        val tag = info.text("language")
+                        if (
+                            tag.isNotEmpty() &&
+                                WarningLanguage.fromTag(tag) != WarningLanguage.GERMAN
+                        )
+                            continue
                         val expires = parseTime(info.text("expires")) ?: continue
                         val effective = parseTime(info.text("effective")) ?: continue
                         val starts = parseTime(info.text("onset")) ?: effective
                         if (effective > now || expires <= now || starts >= expires) continue
-                        val headline = info.text("headline").ifBlank { info.text("event") }
+                        val text = info.warningText()
                         if (
-                            headline.isBlank() ||
+                            text.headline.isBlank() ||
                                 !info.children("area").any { area ->
                                     area.children("polygon").any {
                                         contains(it.textContent, place)
@@ -89,14 +141,19 @@ internal object DwdWarnings {
                                 .firstOrNull { it.text("valueName") == "LICENSE" }
                                 ?.text("value")
                                 .orEmpty()
+                        val translations =
+                            if (multilingual && id != null) translationsOf(info, infos)
+                            else emptyMap()
                         add(
                             DwdWarning(
-                                headline,
-                                info.text("description"),
-                                info.text("instruction"),
+                                text.headline,
+                                text.description,
+                                text.instruction,
                                 starts,
                                 expires,
                                 credit,
+                                id,
+                                translations,
                             )
                         )
                     }
@@ -114,6 +171,37 @@ internal object DwdWarnings {
 
     private fun Element.text(name: String): String =
         children(name).firstOrNull()?.textContent?.trim().orEmpty()
+
+    private fun Element.warningText() =
+        WarningText(
+            text("headline").ifBlank { text("event") },
+            text("description"),
+            text("instruction"),
+        )
+
+    private fun translationsOf(
+        info: Element,
+        infos: List<Element>,
+    ): Map<WarningLanguage, WarningText> = buildMap {
+        val original = info.warningText()
+        for (candidate in infos) {
+            val language = WarningLanguage.fromTag(candidate.text("language")) ?: continue
+            if (language == WarningLanguage.GERMAN) continue
+            if (
+                candidate.text("expires") != info.text("expires") ||
+                    candidate.text("effective") != info.text("effective") ||
+                    candidate.text("onset") != info.text("onset")
+            )
+                continue
+            val translation = candidate.warningText()
+            if (
+                translation.headline.isNotBlank() &&
+                    (original.description.isBlank() || translation.description.isNotBlank()) &&
+                    (original.instruction.isBlank() || translation.instruction.isNotBlank())
+            )
+                put(language, translation)
+        }
+    }
 
     private fun parseTime(value: String): Long? = runCatching {
         OffsetDateTime.parse(value).toInstant().toEpochMilli()

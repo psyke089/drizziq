@@ -100,33 +100,13 @@ class RadarMap(context: Context) : View(context) {
     private val geographicMesh = DoubleArray(33 * 37 * 2)
     private val drawingMesh = FloatArray(33 * 37 * 2)
     private val tileRect = RectF()
-    private val dark =
-        ColorMatrixColorFilter(
-            ColorMatrix(
-                floatArrayOf(
-                    -.17f,
-                    -.17f,
-                    -.17f,
-                    0f,
-                    112f,
-                    -.18f,
-                    -.18f,
-                    -.18f,
-                    0f,
-                    130f,
-                    -.16f,
-                    -.16f,
-                    -.16f,
-                    0f,
-                    149f,
-                    0f,
-                    0f,
-                    0f,
-                    1f,
-                    0f,
-                )
-            )
-        )
+    internal var mapTheme = RadarMapTheme.ORIGINAL
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+
     private val scale =
         ScaleGestureDetector(
             context,
@@ -427,7 +407,8 @@ class RadarMap(context: Context) : View(context) {
         val tile = world() / count
         val left = x * count - width / 2 / tile
         val top = y * count - height / 2 / tile
-        p.colorFilter = dark
+        val tileFilter = mapTheme.filter
+        p.colorFilter = tileFilter
         p.alpha = 255
         p.style = Paint.Style.FILL
         for (iy in floor(top).toInt()..floor(top + height / tile).toInt()) for (ix in
@@ -458,7 +439,7 @@ class RadarMap(context: Context) : View(context) {
                     p.color = Hud.line
                     c.drawRect(rect, p)
                     p.style = Paint.Style.FILL
-                    p.colorFilter = dark
+                    p.colorFilter = tileFilter
                 }
                 request(key, z, nx, iy)
             }

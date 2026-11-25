@@ -35,6 +35,9 @@ class MainActivity : Activity() {
     private var favourites = emptyList<Place>()
     private lateinit var warningLink: TextView
     private var warningDialog: AlertDialog? = null
+    private var warningOverlay: WarningOverlay? = null
+    private val warningPreferences by lazy { getSharedPreferences("warning-options", MODE_PRIVATE) }
+    private var warningLanguage = WarningLanguage.GERMAN
     private var visibleWarnings = emptyList<DwdWarning>()
     private lateinit var currentWeather: CurrentWeatherHeader
     private lateinit var coordinates: TextView
@@ -73,6 +76,8 @@ class MainActivity : Activity() {
     private lateinit var radarTime: TextView
     private lateinit var radarOverlay: FrameLayout
     private lateinit var radarStatus: RadarStatusPanel
+    private val radarPreferences by lazy { getSharedPreferences("radar-options", MODE_PRIVATE) }
+    private var radarInterval = DEFAULT_RADAR_INTERVAL
     private var requestedFrameFile: String? = null
     private var requestedFrameTime: Long? = null
     private var radarBackCallback: android.window.OnBackInvokedCallback? = null
@@ -162,7 +167,10 @@ class MainActivity : Activity() {
                 if (!active || dead) return
                 repo.age()
                 render()
-                if (repo.online && AppPlatform.now() - lastRefresh > 300000) refresh(false)
+                if (repo.online) {
+                    if (AppPlatform.now() - lastRefresh > 300000) refresh(false)
+                    if (radarVisible) repo.showRadar(radarInterval)
+                }
                 handler.postDelayed(this, 30000)
             }
         }
@@ -177,6 +185,9 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        warningLanguage =
+            WarningLanguage.fromTag(warningPreferences.getString("language", null).orEmpty())
+                ?: WarningLanguage.GERMAN
         store = PlaceStore(this)
         favourites = store.favourites()
         zones = ZoneLookup(this)
@@ -293,34 +304,54 @@ class MainActivity : Activity() {
             row().apply {
                 setPadding(dp(20), 0, dp(20), 0)
                 minimumHeight = dp(112)
+                gravity = Gravity.TOP
             }
         val placeColumn = column()
         placeTitle =
-            label("Munich", 28f).apply {
+            FittingPlaceTitle(this).apply {
                 tag = "place-name"
                 setOnClickListener { switchSavedPlace() }
                 isClickable = false
-                compoundDrawablePadding = dp(6)
-                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                gravity = Gravity.CENTER_VERTICAL
-                minimumHeight = dp(44)
             }
         coordinates = label("", 9f, Hud.muted, true)
-        val nameRow = row()
-        nameRow.addView(placeTitle, LinearLayout.LayoutParams(-2, -2, 1f))
+        val favouriteWidth = dp(40)
+        val nameRow =
+            object : LinearLayout(this) {
+                init {
+                    orientation = HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+
+                override fun measureChildWithMargins(
+                    child: View,
+                    parentWidthMeasureSpec: Int,
+                    widthUsed: Int,
+                    parentHeightMeasureSpec: Int,
+                    heightUsed: Int,
+                ) {
+                    super.measureChildWithMargins(
+                        child,
+                        parentWidthMeasureSpec,
+                        widthUsed + if (child === placeTitle) favouriteWidth else 0,
+                        parentHeightMeasureSpec,
+                        heightUsed,
+                    )
+                }
+            }
+        nameRow.addView(placeTitle, LinearLayout.LayoutParams(-2, -2))
         favouriteButton =
             ImageButton(this).apply {
                 background = null
                 pad(9)
                 setOnClickListener { toggleFavourite() }
             }
-        nameRow.addView(favouriteButton, LinearLayout.LayoutParams(dp(40), dp(44)))
+        nameRow.addView(favouriteButton, LinearLayout.LayoutParams(favouriteWidth, dp(44)))
         placeColumn.addView(nameRow, LinearLayout.LayoutParams(-2, -2))
         placeColumn.space(6)
         placeColumn.addView(coordinates)
         warningLink =
             label(getString(R.string.weather_warnings), 12f, Hud.amber).apply {
-                visibility = View.GONE
+                visibility = View.INVISIBLE
                 minimumHeight = dp(32)
                 gravity = Gravity.CENTER_VERTICAL
                 compoundDrawablePadding = dp(5)
@@ -334,7 +365,7 @@ class MainActivity : Activity() {
         currentWeather = CurrentWeatherHeader(this)
         location.addView(
             currentWeather,
-            LinearLayout.LayoutParams(dp(180), -2).apply { leftMargin = dp(12) },
+            LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(12) },
         )
         root.addView(location)
         root.space(16)
@@ -726,7 +757,15 @@ class MainActivity : Activity() {
 
     private fun createRadar() {
         radarPanel = FrameLayout(this)
-        map = RadarMap(this)
+        val theme =
+            RadarMapTheme.entries.firstOrNull {
+                it.name == radarPreferences.getString("map-theme", null)
+            } ?: RadarMapTheme.ORIGINAL
+        radarInterval =
+            radarPreferences.getInt("update-interval", DEFAULT_RADAR_INTERVAL).takeIf {
+                it in RADAR_INTERVALS
+            } ?: DEFAULT_RADAR_INTERVAL
+        map = RadarMap(this).apply { mapTheme = theme }
         radarPanel.addView(map, FrameLayout.LayoutParams(-1, -1))
         radarNotice =
             label("", 11f, Hud.amber).apply {
@@ -820,24 +859,24 @@ class MainActivity : Activity() {
             controls,
             FrameLayout.LayoutParams(-1, dp(40), Gravity.BOTTOM),
         )
-        val details =
+        val settings =
             FrameLayout(this).apply {
-                contentDescription = "Radar details"
+                contentDescription = "Radar settings"
                 isClickable = true
                 isFocusable = true
                 background = panel(0xA60F1A28.toInt(), Hud.line, dp(24).toFloat())
                 addView(
-                    SvgIcon(this@MainActivity, "info").apply {
+                    SvgIcon(this@MainActivity, "settings").apply {
                         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                     },
                     FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER),
                 )
                 setOnClickListener {
-                    showRadarDetails(radarOverlay.visibility != View.VISIBLE)
+                    showRadarSettings(radarOverlay.visibility != View.VISIBLE)
                 }
             }
         radarPanel.addView(
-            details,
+            settings,
             FrameLayout.LayoutParams(dp(48), dp(48), Gravity.BOTTOM or Gravity.END).apply {
                 rightMargin = dp(12)
                 bottomMargin = dp(52)
@@ -863,11 +902,26 @@ class MainActivity : Activity() {
         radarOverlay =
             FrameLayout(this).apply {
                 visibility = View.GONE
-                setOnClickListener { showRadarDetails(false) }
+                setOnClickListener { showRadarSettings(false) }
             }
         radarStatus =
             RadarStatusPanel(
                 this,
+                mapTheme = theme,
+                interval = radarInterval,
+                selectTheme = {
+                    if (map.mapTheme != it) {
+                        map.mapTheme = it
+                        radarPreferences.edit().putString("map-theme", it.name).apply()
+                    }
+                },
+                selectInterval = {
+                    if (radarInterval != it) {
+                        radarInterval = it
+                        radarPreferences.edit().putInt("update-interval", it).apply()
+                        if (active && radarVisible && repo.online) repo.showRadar(it)
+                    }
+                },
                 refresh = {
                     repo.connection()
                     repo.refreshRadar()
@@ -876,7 +930,7 @@ class MainActivity : Activity() {
                     setPlaying(false)
                     repo.clearRadarCache()
                 },
-                close = { showRadarDetails(false) },
+                close = { showRadarSettings(false) },
             )
         val overlayScroll = ScrollView(this).apply { addView(radarStatus) }
         radarOverlay.addView(
@@ -892,13 +946,13 @@ class MainActivity : Activity() {
         content.addView(radarPanel, FrameLayout.LayoutParams(-1, -1))
     }
 
-    private fun showRadarDetails(visible: Boolean) {
+    private fun showRadarSettings(visible: Boolean) {
         radarOverlay.visibility = if (visible) View.VISIBLE else View.GONE
         if (visible) radarStatus.bind(repo.radar, repo.radarProgress, repo.place.zone)
         if (android.os.Build.VERSION.SDK_INT >= 33) {
             radarBackCallback?.let { onBackInvokedDispatcher.unregisterOnBackInvokedCallback(it) }
             radarBackCallback =
-                if (visible) android.window.OnBackInvokedCallback { showRadarDetails(false) }
+                if (visible) android.window.OnBackInvokedCallback { showRadarSettings(false) }
                 else null
             radarBackCallback?.let {
                 onBackInvokedDispatcher.registerOnBackInvokedCallback(
@@ -915,7 +969,7 @@ class MainActivity : Activity() {
         "GestureBackNavigation"
     ) // Android 13+ uses the callback above.
     override fun onBackPressed() {
-        if (radarOverlay.isShown) showRadarDetails(false) else super.onBackPressed()
+        if (radarOverlay.isShown) showRadarSettings(false) else super.onBackPressed()
     }
 
     private fun updateRadarNotice() {
@@ -1086,9 +1140,9 @@ class MainActivity : Activity() {
         }
         if (!radarVisible) {
             setPlaying(false)
-            showRadarDetails(false)
+            showRadarSettings(false)
         }
-        if (radarVisible) repo.showRadar()
+        if (radarVisible) repo.showRadar(radarInterval)
         if (value == Page.PLACES) locations()
         if (value == Page.TODAY || value == Page.WEEK) buildForecast(forecastOffsets[value] ?: 0)
     }
@@ -1124,7 +1178,7 @@ class MainActivity : Activity() {
         lastRefresh = now
         repo.connection()
         if (force || repo.forecast.needsRefresh(now, 30 * 60_000L)) repo.refreshForecast()
-        if (force || radarVisible) repo.refreshRadar()
+        if (force) repo.refreshRadar()
         if (force) repo.refreshWarnings(now, force = true)
     }
 
@@ -1151,43 +1205,50 @@ class MainActivity : Activity() {
     }
 
     private fun bindWarnings(now: Long) {
-        val warnings = repo.warnings(now)
-        if (warnings != visibleWarnings) {
-            warningDialog?.dismiss()
-            visibleWarnings = warnings
-        }
-        warningLink.visibility = if (warnings.isEmpty()) View.GONE else View.VISIBLE
+        visibleWarnings = repo.warnings(now)
+        warningLink.visibility = if (visibleWarnings.isEmpty()) View.INVISIBLE else View.VISIBLE
         if (started) repo.refreshWarnings(now)
+        if (visibleWarnings.isEmpty()) warningDialog?.dismiss() else updateWarningOverlay(now)
+    }
+
+    private fun updateWarningOverlay(now: Long) {
+        val overlay = warningOverlay ?: return
+        val useTranslations = warningLanguage != WarningLanguage.GERMAN
+        if (useTranslations && started) repo.refreshWarningTranslations(now)
+        overlay.bind(
+            warningLanguage,
+            visibleWarnings,
+            if (useTranslations) repo.warningTranslations(now) else emptyList(),
+            useTranslations && repo.loadingWarningTranslations,
+            repo.place.zone,
+        )
     }
 
     private fun showWarnings() {
         if (visibleWarnings.isEmpty()) return
-        val body = column().apply { setPadding(dp(20), dp(4), dp(20), dp(16)) }
-        val zone = repo.place.zone
-        for (warning in visibleWarnings) {
-            body.addView(label(warning.headline, 15f, Hud.amber))
-            body.space(6)
-            val start = Times.format(warning.starts, "dd.MM. HH:mm z", zone)
-            val end = Times.format(warning.expires, "dd.MM. HH:mm z", zone)
-            body.addView(label("$start – $end", 11f, Hud.muted, true))
-            for (message in
-                listOf(warning.description, warning.instruction).filter { it.isNotBlank() }) {
-                body.space(8)
-                body.addView(label(message, 14f))
+        val overlay =
+            WarningOverlay(this, warningLanguage) { selected ->
+                if (warningLanguage != selected) {
+                    warningLanguage = selected
+                    warningPreferences.edit().putString("language", selected.code).apply()
+                    updateWarningOverlay(AppPlatform.now())
+                }
             }
-            body.space(18)
-        }
-        val credit =
-            listOf(getString(R.string.warning_source)) +
-                visibleWarnings.map { it.geometryCredit }.filter { it.isNotBlank() }.distinct()
-        body.addView(label(credit.joinToString("\n"), 10f, Hud.muted))
         val dialog =
             placeDialog(
-                AlertDialog.Builder(this).setView(ScrollView(this).apply { addView(body) }),
+                AlertDialog.Builder(this).setView(overlay.view),
                 getString(R.string.weather_warnings),
+                headerControl = overlay.selector,
             )
-        dialog.setOnDismissListener { if (warningDialog === dialog) warningDialog = null }
+        dialog.setOnDismissListener {
+            if (warningDialog === dialog) {
+                warningDialog = null
+                warningOverlay = null
+            }
+        }
         warningDialog = dialog
+        warningOverlay = overlay
+        updateWarningOverlay(AppPlatform.now())
         dialog.show()
     }
 
@@ -1511,13 +1572,13 @@ class MainActivity : Activity() {
             val was = repo.online
             val online = repo.connection()
             if (online && (!was || changedWhileStopped)) refresh()
-            if (radarVisible) repo.showRadar()
+            if (radarVisible) repo.showRadar(radarInterval)
         }
     }
 
     override fun onStop() {
         warningDialog?.dismiss()
-        showRadarDetails(false)
+        showRadarSettings(false)
         started = false
         stopped = true
         map.setPaused(true)

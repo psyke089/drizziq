@@ -5,14 +5,22 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
+import android.widget.Spinner
 
 /** A translucent in-map panel, updated only with radar progress rather than unrelated HTTP. */
 @SuppressLint("ViewConstructor") // Programmatic panel requires radar actions.
 internal class RadarStatusPanel(
     context: Context,
+    mapTheme: RadarMapTheme,
+    interval: Int,
+    selectTheme: (RadarMapTheme) -> Unit,
+    selectInterval: (Int) -> Unit,
     refresh: () -> Unit,
     clear: () -> Unit,
     close: () -> Unit,
@@ -34,10 +42,13 @@ internal class RadarStatusPanel(
         background = panel(0xDF0F1A28.toInt(), Hud.line, context.dp(12).toFloat())
         isClickable = true
         val header = context.row()
-        header.addView(context.label("RADAR", 12f, Hud.cyan, true), LayoutParams(0, -2, 1f))
+        header.addView(
+            context.label("RADAR SETTINGS", 12f, Hud.cyan, true),
+            LayoutParams(0, -2, 1f),
+        )
         header.addView(
             FrameLayout(context).apply {
-                contentDescription = "Close radar details"
+                contentDescription = "Close radar settings"
                 isClickable = true
                 isFocusable = true
                 addView(
@@ -51,6 +62,26 @@ internal class RadarStatusPanel(
             LayoutParams(context.dp(48), context.dp(48)),
         )
         addView(header)
+        addView(
+            optionsRow(
+                "Map theme",
+                RadarMapTheme.entries.map { it.title },
+                mapTheme.ordinal,
+                RadarMapTheme.entries.map { IconAssets.resource(it.preview) },
+            ) {
+                selectTheme(RadarMapTheme.entries[it])
+            }
+        )
+        addView(
+            optionsRow(
+                "Update interval",
+                RADAR_INTERVALS.map { "$it min" },
+                RADAR_INTERVALS.indexOf(interval),
+            ) {
+                selectInterval(RADAR_INTERVALS[it])
+            }
+        )
+        space(12)
         addView(last)
         space(10)
         addView(state)
@@ -70,6 +101,67 @@ internal class RadarStatusPanel(
         actions.addView(refreshButton, LayoutParams(0, -2, 1f))
         actions.addView(clearButton, LayoutParams(0, -2, 1f).apply { leftMargin = context.dp(8) })
         addView(actions)
+    }
+
+    private fun optionsRow(
+        title: String,
+        options: List<String>,
+        selected: Int,
+        icons: List<Int> = emptyList(),
+        onSelect: (Int) -> Unit,
+    ): View {
+        val selector =
+            Spinner(context, Spinner.MODE_DROPDOWN).apply {
+                id = View.generateViewId()
+                tag = title
+                setPopupBackgroundDrawable(panel())
+                adapter =
+                    object :
+                        ArrayAdapter<String>(
+                            context,
+                            android.R.layout.simple_spinner_item,
+                            options,
+                        ) {
+                        private fun option(position: Int) =
+                            context.label(options[position], 13f).apply {
+                                gravity = Gravity.CENTER_VERTICAL
+                                minimumHeight = context.dp(48)
+                                setPadding(context.dp(8), 0, context.dp(8), 0)
+                                compoundDrawablePadding = context.dp(6)
+                                icons.getOrNull(position)?.let {
+                                    setCompoundDrawablesRelativeWithIntrinsicBounds(it, 0, 0, 0)
+                                }
+                            }
+
+                        override fun getView(position: Int, convertView: View?, parent: ViewGroup) =
+                            option(position)
+
+                        override fun getDropDownView(
+                            position: Int,
+                            convertView: View?,
+                            parent: ViewGroup,
+                        ) = option(position)
+                    }
+                setSelection(selected)
+                onItemSelectedListener =
+                    object : AdapterView.OnItemSelectedListener {
+                        override fun onItemSelected(
+                            parent: AdapterView<*>,
+                            view: View?,
+                            position: Int,
+                            id: Long,
+                        ) = onSelect(position)
+
+                        override fun onNothingSelected(parent: AdapterView<*>) = Unit
+                    }
+            }
+        return context.row().apply {
+            addView(
+                context.label(title, 12f, Hud.muted).apply { labelFor = selector.id },
+                LayoutParams(0, -2, 2f),
+            )
+            addView(selector, LayoutParams(0, -2, 3f))
+        }
     }
 
     private fun bar() =

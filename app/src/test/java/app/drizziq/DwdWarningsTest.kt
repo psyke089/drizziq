@@ -22,6 +22,29 @@ class DwdWarningsTest {
             .toByteArray()
 
     @Test
+    fun multilingualArchiveKeepsOnlyOneWarningAndFallsBackWhenTranslationIsMissing() {
+        val german = xml.substringAfter("<info>").substringBefore("</info>")
+        val english = german.replace("Fixture wind warning", "English wind warning")
+        val incomplete = german.replace("<instruction>Secure loose items.</instruction>", "")
+        val multilingual =
+            xml.replace("<info>", "<code>id:wind</code><info><language>de-DE</language>")
+                .replace(
+                    "</alert>",
+                    "<info><language>en-GB</language>$english</info>" +
+                        "<info><language>fr</language>$incomplete</info></alert>",
+                )
+        val warning =
+            DwdWarnings.at(archive(multilingual), Place.MUNICH, now, multilingual = true).single()
+        assertEquals("id:wind", warning.id)
+        assertEquals(
+            "English wind warning",
+            warning.translations[WarningLanguage.ENGLISH]?.headline,
+        )
+        assertNull(warning.translations[WarningLanguage.FRENCH])
+        assertNull(warning.translations[WarningLanguage.POLISH])
+    }
+
+    @Test
     fun publishedUpdateIncludesFutureOnsetAndHonoursExpiryAndGeometry() {
         val zip = archive(xml)
         val warning = DwdWarnings.at(zip, Place.MUNICH, now).single()

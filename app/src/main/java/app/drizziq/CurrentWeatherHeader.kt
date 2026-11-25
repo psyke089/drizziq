@@ -1,10 +1,15 @@
 package app.drizziq
 
 import android.content.Context
+import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.Typeface
+import android.util.TypedValue
 import android.view.Gravity
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.TextView
+import kotlin.math.roundToInt
 
 /** Compact shared weather summary; every field keeps its slot while data is unavailable. */
 class CurrentWeatherHeader(context: Context) : LinearLayout(context) {
@@ -17,7 +22,7 @@ class CurrentWeatherHeader(context: Context) : LinearLayout(context) {
             tag = "header-temperature"
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             maxLines = 1
-            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            gravity = Gravity.END or Gravity.TOP
         }
     private val condition =
         WeatherGlyph(context).apply {
@@ -41,10 +46,10 @@ class CurrentWeatherHeader(context: Context) : LinearLayout(context) {
     init {
         tag = "header-weather"
         orientation = VERTICAL
-        gravity = Gravity.CENTER_VERTICAL
+        gravity = Gravity.TOP
         minimumHeight = context.dp(112)
         val top = context.row()
-        top.addView(temperature, LayoutParams(0, -2, 1f))
+        top.addView(temperature, LayoutParams(0, -2, 1f).apply { gravity = Gravity.TOP })
         top.addView(
             condition,
             LayoutParams(context.dp(60), context.dp(60)).apply { leftMargin = context.dp(4) },
@@ -116,7 +121,9 @@ class CurrentWeatherHeader(context: Context) : LinearLayout(context) {
 
 /** Fits the complete value on API 24+ without a support-library dependency or clipped digits. */
 @android.annotation.SuppressLint("ViewConstructor")
-private class FittingTemperature(context: Context) : android.widget.TextView(context) {
+private class FittingTemperature(context: Context) : TextView(context) {
+    private val textTop = HeaderTextTop(this, "0")
+
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         super.onLayout(changed, left, top, right, bottom)
         val available = width - paddingLeft - paddingRight
@@ -135,5 +142,28 @@ private class FittingTemperature(context: Context) : android.widget.TextView(con
         val fitted = minOf(maximum, maximum * available / measured)
         if (kotlin.math.abs(textSize - fitted) > .5f)
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, fitted)
+        textTop.align()
+    }
+}
+
+/** Aligns capitals and digits of different font sizes to the same visible top edge. */
+internal class HeaderTextTop(private val view: TextView, private val reference: String) {
+    private val bounds = Rect()
+    private val metrics = Paint.FontMetricsInt()
+
+    fun align() {
+        view.paint.getTextBounds(reference, 0, reference.length, bounds)
+        view.paint.getFontMetricsInt(metrics)
+        val capTop =
+            TypedValue.applyDimension(
+                    TypedValue.COMPLEX_UNIT_SP,
+                    12f,
+                    view.resources.displayMetrics,
+                )
+                .roundToInt()
+        val padding = (capTop + metrics.ascent - bounds.top).coerceAtLeast(0)
+        if (view.paddingTop != padding) {
+            view.setPaddingRelative(view.paddingStart, padding, view.paddingEnd, view.paddingBottom)
+        }
     }
 }

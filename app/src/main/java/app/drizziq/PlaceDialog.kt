@@ -7,22 +7,25 @@ import android.graphics.drawable.InsetDrawable
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 
 /** The X uses cancel(), exactly like Back/outside dismissal, never an affirmative callback. */
-internal fun Activity.placeDialog(builder: AlertDialog.Builder, title: CharSequence): AlertDialog {
+internal fun Activity.placeDialog(
+    builder: AlertDialog.Builder,
+    title: CharSequence,
+    headerControl: View? = null,
+): AlertDialog {
     val header =
         FrameLayout(this).apply {
             minimumHeight = dp(64)
             setPadding(dp(20), dp(8), dp(8), 0)
         }
-    header.addView(
+    val heading =
         label(title.toString(), 18f).apply {
             maxLines = 2
             ellipsize = android.text.TextUtils.TruncateAt.END
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
-        },
-        FrameLayout.LayoutParams(-1, -2, Gravity.CENTER_VERTICAL).apply { rightMargin = dp(56) },
-    )
+        }
     val close =
         FrameLayout(this).apply {
             contentDescription = "Close dialog"
@@ -35,7 +38,21 @@ internal fun Activity.placeDialog(builder: AlertDialog.Builder, title: CharSeque
                 FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER),
             )
         }
-    header.addView(close, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.END))
+    if (headerControl == null) {
+        header.addView(
+            heading,
+            FrameLayout.LayoutParams(-1, -2, Gravity.CENTER_VERTICAL).apply {
+                rightMargin = dp(56)
+            },
+        )
+        header.addView(close, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.END))
+    } else {
+        val controls = row()
+        controls.addView(heading, LinearLayout.LayoutParams(0, -2, 1f))
+        controls.addView(headerControl, LinearLayout.LayoutParams(-2, dp(48)))
+        controls.addView(close, LinearLayout.LayoutParams(dp(48), dp(48)))
+        header.addView(controls, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER_VERTICAL))
+    }
     val dialog = builder.setCustomTitle(header).create()
     dialog.window?.setBackgroundDrawable(
         InsetDrawable(panel(Hud.panel, Hud.line, dp(16).toFloat()), dp(16), dp(8), dp(16), dp(8))
