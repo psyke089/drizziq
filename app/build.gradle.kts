@@ -15,8 +15,8 @@ android {
         applicationId = "app.drizziq"
         minSdk = 24
         targetSdk = 37
-        versionCode = 17
-        versionName = "1.8.0"
+        versionCode = 18
+        versionName = "1.8.1"
         testInstrumentationRunner = "app.drizziq.PhoneExercise"
     }
     compileOptions {
@@ -43,6 +43,8 @@ android {
     buildFeatures { buildConfig = true }
     lint {
         warningsAsErrors = true
+        // Dependency update notices depend on network metadata and are not code defects.
+        disable += setOf("AndroidGradlePluginVersion", "NewerVersionAvailable")
     }
     sourceSets.getByName("androidTest").assets.directories.add("src/test/resources")
 }
